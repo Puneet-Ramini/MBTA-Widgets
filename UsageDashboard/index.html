@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MBTA API Usage Dashboard</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f7fb;
+            --card: #ffffff;
+            --border: #d9e2ef;
+            --text: #17324d;
+            --muted: #67809a;
+            --blue: #165baa;
+            --yellow: #f7d85d;
+            --green: #1f9d55;
+            --red: #d64545;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            background: linear-gradient(180deg, #eef4fb 0%, var(--bg) 100%);
+            color: var(--text);
+        }
+
+        .page {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1, h2, h3, p { margin: 0; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .header p {
+            color: var(--muted);
+            margin-top: 8px;
+            max-width: 760px;
+            line-height: 1.4;
+        }
+
+        .timestamp {
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            font-size: 14px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .hero {
+            grid-template-columns: 2fr 1fr 1fr;
+            margin-bottom: 16px;
+        }
+
+        .charts {
+            grid-template-columns: 1fr 1fr;
+            margin-bottom: 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 18px;
+            box-shadow: 0 10px 25px rgba(22, 91, 170, 0.05);
+        }
+
+        .card h2 {
+            font-size: 17px;
+            margin-bottom: 6px;
+        }
+
+        .card .subtext {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.4;
+            margin-bottom: 14px;
+        }
+
+        .progress-wrap {
+            background: #e8eef7;
+            border-radius: 999px;
+            height: 16px;
+            overflow: hidden;
+            margin: 14px 0 16px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0;
+            background: linear-gradient(90deg, var(--blue), #2d8cff);
+            border-radius: 999px;
+            transition: width 0.3s ease;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            padding: 12px;
+            border-radius: 18px;
+            background: #f8fbff;
+            border: 1px solid #e3ebf6;
+        }
+
+        .metric .value {
+            display: block;
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+
+        .success { color: var(--green); }
+        .failure { color: var(--red); }
+
+        .bars {
+            display: grid;
+            gap: 12px;
+        }
+
+        .bar-row {
+            display: grid;
+            grid-template-columns: 120px 1fr 60px;
+            gap: 12px;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .bar-track {
+            height: 12px;
+            background: #edf2f9;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            width: 0;
+            background: var(--yellow);
+            border-radius: 999px;
+        }
+
+        .source-fill {
+            background: var(--blue);
+        }
+
+        .mini-chart {
+            display: flex;
+            align-items: end;
+            gap: 8px;
+            min-height: 200px;
+            padding-top: 8px;
+        }
+
+        .mini-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mini-bar {
+            width: 100%;
+            max-width: 36px;
+            border-radius: 12px 12px 6px 6px;
+            background: linear-gradient(180deg, #4da1ff 0%, var(--blue) 100%);
+            min-height: 4px;
+        }
+
+        .mini-label {
+            font-size: 12px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 10px 0;
+            border-bottom: 1px solid #e7edf6;
+        }
+
+        th { color: var(--muted); font-weight: 600; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #eef4fb;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .note {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 900px) {
+            .hero, .charts {
+                grid-template-columns: 1fr;
+            }
+            .metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="header">
+            <div>
+                <h1>MBTA API Usage Dashboard</h1>
+                <p>Live localhost dashboard for simulator usage. It reads the shared app group data written by the app and widget, so every tracked MBTA API call updates here automatically.</p>
+            </div>
+            <div class="timestamp" id="timestamp">Refreshing...</div>
+        </section>
+
+        <section class="grid hero">
+            <article class="card">
+                <h2>Request Totals</h2>
+                <p class="subtext">Shows total tracked MBTA requests. Use the minute table below to watch rate-limited bursts more accurately.</p>
+                <div class="progress-wrap">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="metrics">
+                    <div class="metric">
+                        <span>Used</span>
+                        <span class="value" id="usedCount">0</span>
+                    </div>
+                    <div class="metric">
+                        <span>Remaining</span>
+                        <span class="value" id="remainingCount">2000</span>
+                    </div>
+                    <div class="metric">
+                        <span>Percent</span>
+                        <span class="value" id="percentCount">0%</span>
+                    </div>
+                </div>
+            </article>
+
+            <article class="card">
+                <h2>Success vs Failure</h2>
+                <p class="subtext">Useful for spotting quota waste from failed requests.</p>
+                <div class="metrics">
+                    <div class="metric">
+                        <span>Success</span>
+                        <span class="value success" id="successCount">0</span>
+                    </div>
+                    <div class="metric">
+                        <span>Failed</span>
+                        <span class="value failure" id="failedCount">0</span>
+                    </div>
+                </div>
+            </article>
+
+            <article class="card">
+                <h2>Minute Watch</h2>
+                <p class="subtext">Live view of short-term usage, which is usually the more useful limit to watch in practice.</p>
+                <div class="metrics">
+                    <div class="metric">
+                        <span>Current Minute</span>
+                        <span class="value" id="currentMinuteCount">0</span>
+                    </div>
+                    <div class="metric">
+                        <span>Peak Minute</span>
+                        <span class="value" id="peakMinuteCount">0</span>
+                    </div>
+                </div>
+            </article>
+
+            <article class="card">
+                <h2>Data Source</h2>
+                <p class="subtext" id="dataSource">Waiting for simulator data...</p>
+                <p class="note">This page is live: it polls every 5 seconds. On a physical iPhone, localhost cannot directly read the phone sandbox, so this dashboard is intended for simulator-based tracking.</p>
+            </article>
+        </section>
+
+        <section class="grid charts">
+            <article class="card">
+                <h2>Requests by Endpoint</h2>
+                <p class="subtext">Shows which MBTA endpoints are using your quota.</p>
+                <div class="bars" id="endpointBars"></div>
+            </article>
+
+            <article class="card">
+                <h2>Requests by Source</h2>
+                <p class="subtext">Splits usage between the app screen and widget refreshes.</p>
+                <div class="bars" id="sourceBars"></div>
+            </article>
+
+            <article class="card">
+                <h2>Daily Usage</h2>
+                <p class="subtext">Last 7 days of tracked requests.</p>
+                <div class="mini-chart" id="dailyChart"></div>
+            </article>
+
+            <article class="card">
+                <h2>Hourly Usage</h2>
+                <p class="subtext">Last 12 tracked hours so you can spot spikes.</p>
+                <div class="mini-chart" id="hourlyChart"></div>
+            </article>
+        </section>
+
+        <section class="card">
+            <h2>Per Minute Usage</h2>
+            <p class="subtext">Last 20 tracked minutes. This is the best table for seeing whether you are approaching a per-minute API limit.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Minute</th>
+                        <th>Requests</th>
+                    </tr>
+                </thead>
+                <tbody id="minuteUsage"></tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <h2>Recent Requests</h2>
+            <p class="subtext">Most recent MBTA calls captured from the app and widget.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Endpoint</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="recentRequests"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        function setText(id, value) {
+            document.getElementById(id).textContent = value;
+        }
+
+        function renderBars(containerId, entries, fillClass = "") {
+            const container = document.getElementById(containerId);
+            container.innerHTML = "";
+
+            if (entries.length === 0) {
+                container.innerHTML = "<p class='note'>No requests tracked yet.</p>";
+                return;
+            }
+
+            const maxValue = Math.max(...entries.map((entry) => entry.value), 1);
+            entries.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "bar-row";
+                const percent = (entry.value / maxValue) * 100;
+                row.innerHTML = `
+                    <div>${entry.label}</div>
+                    <div class="bar-track">
+                        <div class="bar-fill ${fillClass}" style="width:${percent}%"></div>
+                    </div>
+                    <div>${entry.value}</div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function renderMiniChart(containerId, entries) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = "";
+
+            if (entries.length === 0) {
+                container.innerHTML = "<p class='note'>No usage data yet.</p>";
+                return;
+            }
+
+            const maxValue = Math.max(...entries.map((entry) => entry.value), 1);
+            entries.forEach((entry) => {
+                const col = document.createElement("div");
+                col.className = "mini-col";
+                const bar = document.createElement("div");
+                bar.className = "mini-bar";
+                bar.style.height = `${Math.max((entry.value / maxValue) * 160, 4)}px`;
+                const label = document.createElement("div");
+                label.className = "mini-label";
+                label.textContent = entry.label;
+                const value = document.createElement("div");
+                value.className = "mini-label";
+                value.textContent = entry.value;
+                col.appendChild(value);
+                col.appendChild(bar);
+                col.appendChild(label);
+                container.appendChild(col);
+            });
+        }
+
+        function renderRecent(events) {
+            const tbody = document.getElementById("recentRequests");
+            tbody.innerHTML = "";
+
+            if (events.length === 0) {
+                tbody.innerHTML = "<tr><td colspan='4'>No tracked requests yet.</td></tr>";
+                return;
+            }
+
+            events.slice(0, 12).forEach((event) => {
+                const row = document.createElement("tr");
+                const status = event.statusCode ?? "Error";
+                const time = event.timestamp ? new Date(event.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "--";
+                row.innerHTML = `
+                    <td>${time}</td>
+                    <td><span class="badge">${event.endpoint}</span></td>
+                    <td>${event.source}</td>
+                    <td>${status}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function renderMinuteUsage(map) {
+            const tbody = document.getElementById("minuteUsage");
+            tbody.innerHTML = "";
+
+            const entries = Object.entries(map || {}).sort((left, right) => right[0].localeCompare(left[0])).slice(0, 20);
+            if (entries.length === 0) {
+                tbody.innerHTML = "<tr><td colspan='2'>No minute-level usage tracked yet.</td></tr>";
+                return;
+            }
+
+            entries.forEach(([minute, count]) => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${minute}</td>
+                    <td>${count}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function toSortedEntries(map, formatter, limit = null) {
+            const entries = Object.entries(map || {}).sort((left, right) => left[0].localeCompare(right[0]));
+            const sliced = limit ? entries.slice(-limit) : entries;
+            return sliced.map(([key, value]) => ({ label: formatter(key), value }));
+        }
+
+        async function refresh() {
+            const response = await fetch("/api/stats", { cache: "no-store" });
+            const stats = await response.json();
+            const minuteEntries = Object.entries(stats.minuteCounts || {}).sort((left, right) => left[0].localeCompare(right[0]));
+            const currentMinuteCount = minuteEntries.length ? minuteEntries[minuteEntries.length - 1][1] : 0;
+            const peakMinuteCount = minuteEntries.length ? Math.max(...minuteEntries.map((entry) => entry[1])) : 0;
+
+            setText("usedCount", stats.totalRequests);
+            setText("remainingCount", stats.remaining);
+            setText("percentCount", `${Math.round(stats.percentUsed)}%`);
+            setText("successCount", stats.successRequests);
+            setText("failedCount", stats.failedRequests);
+            setText("currentMinuteCount", currentMinuteCount);
+            setText("peakMinuteCount", peakMinuteCount);
+            setText("dataSource", stats.dataSource || "No simulator data found.");
+            setText(
+                "timestamp",
+                stats.lastUpdated
+                    ? `Updated ${new Date(stats.lastUpdated).toLocaleTimeString()}`
+                    : "Waiting for first request"
+            );
+            document.getElementById("progressBar").style.width = `${stats.percentUsed}%`;
+
+            renderBars(
+                "endpointBars",
+                Object.entries(stats.endpointCounts || {})
+                    .sort((left, right) => right[1] - left[1])
+                    .map(([label, value]) => ({ label, value }))
+            );
+
+            renderBars(
+                "sourceBars",
+                Object.entries(stats.sourceCounts || {})
+                    .sort((left, right) => right[1] - left[1])
+                    .map(([label, value]) => ({ label, value })),
+                "source-fill"
+            );
+
+            renderMiniChart(
+                "dailyChart",
+                toSortedEntries(stats.dailyCounts, (key) => key.slice(5), 7)
+            );
+
+            renderMiniChart(
+                "hourlyChart",
+                toSortedEntries(stats.hourlyCounts, (key) => key.slice(11) + ":00", 12)
+            );
+
+            renderMinuteUsage(stats.minuteCounts || {});
+            renderRecent(stats.recentRequests || []);
+        }
+
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>

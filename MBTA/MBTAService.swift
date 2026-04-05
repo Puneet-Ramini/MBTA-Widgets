@@ -23,15 +23,27 @@ final class MBTAService {
     }
 
     private func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        var didRecord = false
 
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            APIUsageStore.record(url: url, statusCode: statusCode, source: "app")
+            didRecord = true
+
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            if !didRecord {
+                APIUsageStore.record(url: url, statusCode: nil, source: "app")
+            }
+            throw error
         }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(T.self, from: data)
     }
 
     /// Looks up one route by typed text and transport mode.

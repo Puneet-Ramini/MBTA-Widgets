@@ -41,22 +41,33 @@ private struct WidgetContentState {
 
 struct MBTAWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> MBTAWidgetEntry {
+        // This is shown in widget gallery and during loading
         MBTAWidgetEntry(
             date: Date(),
             routeName: "39",
             directionLine: "To Back Bay Station",
-            stopName: "S Huntington Ave @ Perkins St",
+            stopName: "Huntington Ave @ Perkins St",
             predictions: [
                 WidgetArrivalDisplay(minutesText: "6 min", stopsAwayText: "2 stops away"),
-                WidgetArrivalDisplay(minutesText: "22 min", stopsAwayText: "7 stops away"),
-                WidgetArrivalDisplay(minutesText: "28 min", stopsAwayText: "9 stops away")
+                WidgetArrivalDisplay(minutesText: "15 min", stopsAwayText: "5 stops away"),
+                WidgetArrivalDisplay(minutesText: "22 min", stopsAwayText: "8 stops away")
             ],
             message: nil
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (MBTAWidgetEntry) -> Void) {
-        completion(placeholder(in: context))
+        // Always show nice preview in widget gallery
+        if context.isPreview {
+            completion(placeholder(in: context))
+        } else {
+            // For actual widget on home screen, try to load real data
+            Task {
+                let state = await loadState()
+                let entry = buildPreviewEntry(from: state)
+                completion(entry)
+            }
+        }
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<MBTAWidgetEntry>) -> Void) {
@@ -65,12 +76,52 @@ struct MBTAWidgetProvider: TimelineProvider {
             completion(timeline)
         }
     }
+    
+    private func buildPreviewEntry(from state: WidgetContentState) -> MBTAWidgetEntry {
+        if let message = state.message {
+            return MBTAWidgetEntry(
+                date: Date(),
+                routeName: state.routeName,
+                directionLine: state.directionLine,
+                stopName: state.stopName,
+                predictions: [],
+                message: message
+            )
+        }
+        
+        let predictions = state.arrivals.map { arrival in
+            WidgetArrivalDisplay(
+                minutesText: formatMinutes(arrival.arrivalDate),
+                stopsAwayText: arrival.stopsAwayText
+            )
+        }
+        
+        return MBTAWidgetEntry(
+            date: Date(),
+            routeName: state.routeName,
+            directionLine: state.directionLine,
+            stopName: state.stopName,
+            predictions: predictions,
+            message: nil
+        )
+    }
+    
+    private func formatMinutes(_ date: Date) -> String {
+        let minutes = Int(date.timeIntervalSinceNow / 60)
+        if minutes < 1 {
+            return "Now"
+        }
+        return "\(minutes) min"
+    }
 
     private func loadTimeline() async -> Timeline<MBTAWidgetEntry> {
         let state = await loadState()
         let now = Date()
         let entries = buildEntries(from: state, startingAt: now)
-        let refreshDate = Calendar.current.date(byAdding: .minute, value: 15, to: now) ?? now.addingTimeInterval(900)
+        
+        // Refresh more frequently - every 2 minutes for real-time accuracy
+        let refreshDate = Calendar.current.date(byAdding: .minute, value: 2, to: now) ?? now.addingTimeInterval(120)
+        
         return Timeline(entries: entries, policy: .after(refreshDate))
     }
 
@@ -114,7 +165,9 @@ struct MBTAWidgetProvider: TimelineProvider {
     }
 
     private func buildEntries(from state: WidgetContentState, startingAt startDate: Date) -> [MBTAWidgetEntry] {
-        let minuteOffsets = Array(0...14)
+        // Create entries for the next 2 minutes (since we refresh every 2 minutes)
+        // This keeps the countdown accurate while not overloading the timeline
+        let minuteOffsets = [0, 1]
         let entries = minuteOffsets.map { minuteOffset in
             let entryDate = Calendar.current.date(byAdding: .minute, value: minuteOffset, to: startDate) ?? startDate
             return MBTAWidgetEntry(
@@ -148,7 +201,7 @@ struct MBTAWidgetEntryView: View {
     var entry: MBTAWidgetProvider.Entry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 Text(entry.routeName)
                     .font(.headline)
@@ -172,6 +225,8 @@ struct MBTAWidgetEntryView: View {
                             .lineLimit(1)
                     }
                 }
+                
+                Spacer(minLength: 0)
             }
 
             if let message = entry.message {
@@ -181,16 +236,18 @@ struct MBTAWidgetEntryView: View {
                     .foregroundColor(.secondary)
                 Spacer()
             } else {
-                HStack(spacing: 10) {
+                Spacer(minLength: 4)
+                
+                HStack(spacing: 8) {
                     ForEach(entry.predictions, id: \.self) { prediction in
-                        VStack(spacing: 6) {
+                        VStack(spacing: 4) {
                             Text(prediction.minutesText)
                                 .font(.subheadline)
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, 6)
                                 .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                                 .clipShape(Capsule())
 
@@ -204,29 +261,31 @@ struct MBTAWidgetEntryView: View {
                                     .font(.caption2)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .top)
+                        .frame(maxWidth: .infinity, alignment: .top)
                     }
 
                     if entry.predictions.count < 3 {
                         ForEach(entry.predictions.count..<3, id: \.self) { _ in
-                            VStack(spacing: 6) {
+                            VStack(spacing: 4) {
                                 Text("--")
                                     .font(.subheadline)
                                     .fontWeight(.bold)
                                     .foregroundColor(.white.opacity(0.85))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
-                                    .padding(.horizontal, 8)
+                                    .padding(.horizontal, 6)
                                     .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                                     .clipShape(Capsule())
 
                                 Text(" ")
                                     .font(.caption2)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .top)
+                            .frame(maxWidth: .infinity, alignment: .top)
                         }
                     }
                 }
+                
+                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -243,7 +302,7 @@ struct MBTAWidget: Widget {
         }
         .configurationDisplayName("MBTA Arrivals")
         .description("Shows the next 3 buses for your selected stop.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemMedium])
     }
 }
 
@@ -252,6 +311,37 @@ struct MBTAWidgetBundle: WidgetBundle {
     var body: some Widget {
         MBTAWidget()
     }
+}
+
+// MARK: - Previews
+#Preview(as: .systemMedium) {
+    MBTAWidget()
+} timeline: {
+    MBTAWidgetEntry(
+        date: Date(),
+        routeName: "39",
+        directionLine: "To Back Bay Station",
+        stopName: "Huntington Ave @ Perkins St",
+        predictions: [
+            WidgetArrivalDisplay(minutesText: "6 min", stopsAwayText: "2 stops away"),
+            WidgetArrivalDisplay(minutesText: "15 min", stopsAwayText: "5 stops away"),
+            WidgetArrivalDisplay(minutesText: "22 min", stopsAwayText: "8 stops away")
+        ],
+        message: nil
+    )
+    
+    MBTAWidgetEntry(
+        date: Date().addingTimeInterval(60),
+        routeName: "39",
+        directionLine: "To Back Bay Station",
+        stopName: "Huntington Ave @ Perkins St",
+        predictions: [
+            WidgetArrivalDisplay(minutesText: "5 min", stopsAwayText: "2 stops away"),
+            WidgetArrivalDisplay(minutesText: "14 min", stopsAwayText: "5 stops away"),
+            WidgetArrivalDisplay(minutesText: "21 min", stopsAwayText: "8 stops away")
+        ],
+        message: nil
+    )
 }
 
 private struct StoredWidgetSelection {
@@ -441,7 +531,23 @@ private struct WidgetMBTAService {
             URLQueryItem(name: "api_key", value: apiKey)
         ]
 
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        let url = components.url!
+        var didRecord = false
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await URLSession.shared.data(from: url)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            WidgetAPIUsageStore.record(url: url, statusCode: statusCode, source: "widget")
+            didRecord = true
+        } catch {
+            if !didRecord {
+                WidgetAPIUsageStore.record(url: url, statusCode: nil, source: "widget")
+            }
+            throw error
+        }
+
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -498,7 +604,23 @@ private struct WidgetMBTAService {
             URLQueryItem(name: "api_key", value: apiKey)
         ]
 
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        let url = components.url!
+        var didRecord = false
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await URLSession.shared.data(from: url)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            WidgetAPIUsageStore.record(url: url, statusCode: statusCode, source: "widget")
+            didRecord = true
+        } catch {
+            if !didRecord {
+                WidgetAPIUsageStore.record(url: url, statusCode: nil, source: "widget")
+            }
+            throw error
+        }
+
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -528,6 +650,120 @@ private struct WidgetMBTAService {
 
         return "\(stopsAway) stops away"
     }
+}
+
+private struct WidgetAPIUsageEvent: Codable {
+    let timestamp: Date
+    let endpoint: String
+    let source: String
+    let statusCode: Int?
+}
+
+private struct WidgetAPIUsageSnapshot: Codable {
+    var totalRequests: Int
+    var successRequests: Int
+    var failedRequests: Int
+    var endpointCounts: [String: Int]
+    var sourceCounts: [String: Int]
+    var dailyCounts: [String: Int]
+    var hourlyCounts: [String: Int]
+    var minuteCounts: [String: Int]
+    var recentRequests: [WidgetAPIUsageEvent]
+    var lastUpdated: Date
+
+    static let empty = WidgetAPIUsageSnapshot(
+        totalRequests: 0,
+        successRequests: 0,
+        failedRequests: 0,
+        endpointCounts: [:],
+        sourceCounts: [:],
+        dailyCounts: [:],
+        hourlyCounts: [:],
+        minuteCounts: [:],
+        recentRequests: [],
+        lastUpdated: .distantPast
+    )
+}
+
+private enum WidgetAPIUsageStore {
+    static func record(url: URL, statusCode: Int?, source: String) {
+        guard let defaults = UserDefaults(suiteName: "group.Widgets.MBTA") else {
+            return
+        }
+
+        let now = Date()
+        var snapshot = loadSnapshot(from: defaults)
+        let endpoint = endpointName(from: url)
+        let dayKey = dayFormatter.string(from: now)
+        let hourKey = hourFormatter.string(from: now)
+        let minuteKey = minuteFormatter.string(from: now)
+
+        snapshot.totalRequests += 1
+        if let statusCode, (200...299).contains(statusCode) {
+            snapshot.successRequests += 1
+        } else {
+            snapshot.failedRequests += 1
+        }
+        snapshot.endpointCounts[endpoint, default: 0] += 1
+        snapshot.sourceCounts[source, default: 0] += 1
+        snapshot.dailyCounts[dayKey, default: 0] += 1
+        snapshot.hourlyCounts[hourKey, default: 0] += 1
+        snapshot.minuteCounts[minuteKey, default: 0] += 1
+        snapshot.recentRequests.insert(
+            WidgetAPIUsageEvent(timestamp: now, endpoint: endpoint, source: source, statusCode: statusCode),
+            at: 0
+        )
+        snapshot.recentRequests = Array(snapshot.recentRequests.prefix(100))
+        snapshot.lastUpdated = now
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(snapshot) else {
+            return
+        }
+
+        defaults.set(data, forKey: "apiUsageSnapshot")
+        defaults.set(2000, forKey: "apiUsageLimit")
+    }
+
+    private static func loadSnapshot(from defaults: UserDefaults) -> WidgetAPIUsageSnapshot {
+        guard let data = defaults.data(forKey: "apiUsageSnapshot") else {
+            return .empty
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(WidgetAPIUsageSnapshot.self, from: data)) ?? .empty
+    }
+
+    private static func endpointName(from url: URL) -> String {
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.contains("/") {
+            return String(path.split(separator: "/").first ?? "")
+        }
+        return path.isEmpty ? "unknown" : path
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let hourFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH"
+        return formatter
+    }()
+
+    private static let minuteFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
 }
 
 #Preview(as: .systemSmall) {
