@@ -20,6 +20,10 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>SupabaseProjectURL</key>
+    <string>https://ifooqfgcpeczamayyzja.supabase.co</string>
+    <key>SupabasePublishableKey</key>
+    <string>SUPABASE_PUBLISHABLE_KEY_PLACEHOLDER</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

@@ -1,5 +1,36 @@
 import Foundation
 import Combine
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
+#if canImport(ActivityKit)
+import ActivityKit
+
+@available(iOS 16.2, *)
+public struct BusArrivalAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        public var arrivalTime: Date
+        public var minutesAway: Int
+        public var stopsAway: Int
+        
+        public init(arrivalTime: Date, minutesAway: Int, stopsAway: Int) {
+            self.arrivalTime = arrivalTime
+            self.minutesAway = minutesAway
+            self.stopsAway = stopsAway
+        }
+    }
+    
+    public let routeName: String
+    public let destination: String
+    public let stopName: String
+    
+    public init(routeName: String, destination: String, stopName: String) {
+        self.routeName = routeName
+        self.destination = destination
+        self.stopName = stopName
+    }
+}
+#endif
 
 struct WidgetScheduleOverride: Codable, Identifiable {
     let id: String
@@ -115,6 +146,9 @@ final class ArrivalsViewModel: ObservableObject {
     @Published var isLoadingStops: Bool = false
     @Published var isLoadingArrivals: Bool = false
     @Published var errorMessage: String? = nil
+    @Published var currentActivity: Any? = nil
+    
+    private var reloadTimer: Task<Void, Never>?
 
     var selectedStop: BusStop? {
         stops.first { $0.id == selectedStopID }
@@ -123,6 +157,10 @@ final class ArrivalsViewModel: ObservableObject {
     init() {
         loadQuickRoutes()
         loadWidgetConfiguration()
+    }
+    
+    deinit {
+        reloadTimer?.cancel()
     }
 
     var fieldTitle: String {
@@ -301,6 +339,18 @@ final class ArrivalsViewModel: ObservableObject {
     func selectPresetLine(_ line: PresetLine) {
         selectedPresetLineQuery = line.query
         routeInput = line.query
+        
+        // Clear directions and subsequent data if selecting Green Line
+        // (user needs to pick a branch first)
+        if line.query == "Green" {
+            directions = []
+            selectedDirectionID = nil
+            stops = []
+            selectedStopID = nil
+            arrivals = []
+            selectedRoute = nil
+            saveWidgetSelection()
+        }
     }
 
     func selectGreenBranch(_ line: PresetLine) {
@@ -358,8 +408,17 @@ final class ArrivalsViewModel: ObservableObject {
         isLoadingArrivals = true
 
         do {
-            let predictions = try await MBTAService.shared.fetchPredictions(stopId: stopID, routeId: routeID)
             let routeName = selectedRoute?.displayName ?? routeID
+            let direction = directions.first { $0.id == selectedDirectionID }
+            let directionName = direction?.name
+            
+            let predictions = try await MBTAService.shared.fetchPredictions(
+                stopId: stopID,
+                routeId: routeID,
+                routeName: routeName,
+                directionName: directionName,
+                stopName: stop.name
+            )
 
             arrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
@@ -380,11 +439,64 @@ final class ArrivalsViewModel: ObservableObject {
             if arrivals.isEmpty {
                 errorMessage = "No upcoming buses found for this stop."
             }
+            
+            // Start auto-reload timer (10 seconds)
+            startAutoReload()
         } catch {
             errorMessage = "Failed to load arrival times."
         }
 
         isLoadingArrivals = false
+    }
+    
+    private func startAutoReload() {
+        reloadTimer?.cancel()
+        reloadTimer = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                await loadArrivalsQuietly()
+            }
+        }
+    }
+    
+    private func loadArrivalsQuietly() async {
+        guard let routeID = selectedRoute?.id,
+              let stopID = selectedStopID,
+              let stop = selectedStop else {
+            return
+        }
+
+        do {
+            let routeName = selectedRoute?.displayName ?? routeID
+            let direction = directions.first { $0.id == selectedDirectionID }
+            let directionName = direction?.name
+            
+            let predictions = try await MBTAService.shared.fetchPredictions(
+                stopId: stopID,
+                routeId: routeID,
+                routeName: routeName,
+                directionName: directionName,
+                stopName: stop.name
+            )
+
+            arrivals = Array(predictions.prefix(3)).map { arrival in
+                BusArrival(
+                    id: arrival.id,
+                    routeId: arrival.routeId,
+                    routeName: routeName,
+                    stopId: arrival.stopId,
+                    stopName: stop.name,
+                    arrivalTime: arrival.arrivalTime,
+                    departureTime: arrival.departureTime,
+                    minutesAway: arrival.minutesAway,
+                    stopsAway: arrival.stopsAway,
+                    directionId: arrival.directionId,
+                    status: arrival.status
+                )
+            }
+        } catch {
+            // Silent fail - don't update error message during background refresh
+        }
     }
 
     func saveWidgetSelection() {
@@ -404,6 +516,9 @@ final class ArrivalsViewModel: ObservableObject {
 
             return favorite
         }
+        
+        // Also sync to app group for widgets on first load
+        saveQuickRoutes()
     }
 
     private func saveQuickRoutes() {
@@ -414,6 +529,16 @@ final class ArrivalsViewModel: ObservableObject {
             } else {
                 UserDefaults.standard.removeObject(forKey: key)
             }
+        }
+        
+        // Also save to app group for widgets
+        if let appGroupDefaults = UserDefaults(suiteName: "group.Widgets.MBTA"),
+           let favoritesData = try? encoder.encode(quickFavorites) {
+            appGroupDefaults.set(favoritesData, forKey: "quickFavorites")
+            
+            #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadAllTimelines()
+            #endif
         }
     }
 
@@ -464,5 +589,151 @@ final class ArrivalsViewModel: ObservableObject {
             selectedStopID = favorite.stopID
             saveWidgetSelection()
         }
+    }
+    
+    func startLiveActivity() {
+        #if canImport(ActivityKit)
+        guard #available(iOS 16.2, *) else { return }
+        
+        // Find first arrival with minutes > 0
+        guard let validArrival = arrivals.first(where: { ($0.minutesAway ?? 0) > 0 }),
+              let minutesAway = validArrival.minutesAway,
+              let arrivalTime = validArrival.arrivalTime ?? validArrival.departureTime else {
+            errorMessage = "No upcoming arrivals"
+            return
+        }
+        
+        let destination = selectedDirectionDestination
+        let stopsAway = validArrival.stopsAway ?? 0
+        
+        let attributes = BusArrivalAttributes(
+            routeName: validArrival.routeName,
+            destination: destination.isEmpty ? "Arriving" : destination,
+            stopName: validArrival.stopName
+        )
+        
+        let initialState = BusArrivalAttributes.ContentState(
+            arrivalTime: arrivalTime,
+            minutesAway: minutesAway,
+            stopsAway: stopsAway
+        )
+        
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: initialState, staleDate: nil),
+                pushType: nil
+            )
+            currentActivity = activity
+            
+            Task {
+                await updateLiveActivity(activity: activity)
+            }
+        } catch {
+            errorMessage = "Could not start Live Activity: \(error.localizedDescription)"
+        }
+        #endif
+    }
+    
+    #if canImport(ActivityKit)
+    @available(iOS 16.2, *)
+    private func updateLiveActivity(activity: Activity<BusArrivalAttributes>) async {
+        var isFirstIteration = true
+        
+        while !Task.isCancelled {
+            // Wait 10 seconds before API call (skip on first iteration)
+            if !isFirstIteration {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+            isFirstIteration = false
+            
+            // Fetch fresh data from API every 10 seconds
+            guard let routeID = selectedRoute?.id,
+                  let stopID = selectedStopID else {
+                break
+            }
+            
+            do {
+                let predictions = try await MBTAService.shared.fetchPredictions(stopId: stopID, routeId: routeID)
+                
+                // Get first arrival with minutes > 0
+                guard let validPrediction = predictions.first(where: { ($0.minutesAway ?? 0) > 0 }),
+                      let newArrivalTime = validPrediction.arrivalTime ?? validPrediction.departureTime,
+                      let newMinutesAway = validPrediction.minutesAway else {
+                    // No more arrivals, end activity
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                    await MainActor.run {
+                        currentActivity = nil
+                    }
+                    break
+                }
+                
+                // Update Live Activity with fresh data
+                let updatedState = BusArrivalAttributes.ContentState(
+                    arrivalTime: newArrivalTime,
+                    minutesAway: newMinutesAway,
+                    stopsAway: validPrediction.stopsAway ?? 0
+                )
+                
+                await activity.update(.init(state: updatedState, staleDate: nil))
+                
+                // Update local arrivals in the app too
+                await MainActor.run {
+                    let routeName = selectedRoute?.displayName ?? routeID
+                    let stop = selectedStop
+                    
+                    arrivals = Array(predictions.prefix(3)).map { arrival in
+                        BusArrival(
+                            id: arrival.id,
+                            routeId: arrival.routeId,
+                            routeName: routeName,
+                            stopId: arrival.stopId,
+                            stopName: stop?.name ?? "",
+                            arrivalTime: arrival.arrivalTime,
+                            departureTime: arrival.departureTime,
+                            minutesAway: arrival.minutesAway,
+                            stopsAway: arrival.stopsAway,
+                            directionId: arrival.directionId,
+                            status: arrival.status
+                        )
+                    }
+                }
+            } catch {
+                // On error, continue trying
+                print("Failed to update Live Activity: \(error)")
+            }
+        }
+        
+        // Cleanup
+        await activity.end(nil, dismissalPolicy: .immediate)
+        await MainActor.run {
+            currentActivity = nil
+        }
+    }
+    #endif
+    
+    func stopLiveActivity() {
+        #if canImport(ActivityKit)
+        guard #available(iOS 16.2, *) else { return }
+        
+        if let activity = currentActivity as? Activity<BusArrivalAttributes> {
+            Task {
+                await activity.end(nil, dismissalPolicy: .immediate)
+                await MainActor.run {
+                    currentActivity = nil
+                }
+            }
+        }
+        #endif
+    }
+    
+    private var selectedDirectionDestination: String {
+        guard let directionID = selectedDirectionID,
+              let direction = directions.first(where: { $0.id == directionID }) else {
+            return ""
+        }
+        return direction.destination
+            .replacingOccurrences(of: " Station", with: "")
+            .replacingOccurrences(of: " station", with: "")
     }
 }

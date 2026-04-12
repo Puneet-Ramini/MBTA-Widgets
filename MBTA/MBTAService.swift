@@ -22,14 +22,29 @@ final class MBTAService {
         return url
     }
 
-    private func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+    private func fetch<T: Decodable>(_ type: T.Type, from url: URL, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> T {
         var didRecord = false
+        let startTime = Date()
 
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
+            let responseTime = Int(Date().timeIntervalSince(startTime) * 1000) // milliseconds
             let statusCode = (response as? HTTPURLResponse)?.statusCode
+            
+            // Local logging
             APIUsageStore.record(url: url, statusCode: statusCode, source: "app")
             didRecord = true
+            
+            // Supabase monitoring (silent background logging)
+            let endpoint = url.path.replacingOccurrences(of: "/", with: "")
+            SupabaseMonitoring.shared.logAPICall(
+                endpoint: endpoint,
+                statusCode: statusCode,
+                responseTimeMs: responseTime,
+                routeName: routeName,
+                directionName: directionName,
+                stopName: stopName
+            )
 
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 throw URLError(.badServerResponse)
@@ -41,6 +56,10 @@ final class MBTAService {
         } catch {
             if !didRecord {
                 APIUsageStore.record(url: url, statusCode: nil, source: "app")
+                
+                // Log error to Supabase
+                let endpoint = url.path.replacingOccurrences(of: "/", with: "")
+                SupabaseMonitoring.shared.logAPICall(endpoint: endpoint, statusCode: nil, routeName: routeName, directionName: directionName, stopName: stopName)
             }
             throw error
         }
@@ -100,7 +119,7 @@ final class MBTAService {
     }
 
     /// Fetch predictions for a stop, optionally filtered by route.
-    func fetchPredictions(stopId: String, routeId: String?) async throws -> [BusArrival] {
+    func fetchPredictions(stopId: String, routeId: String?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "filter[stop]", value: stopId),
             URLQueryItem(name: "sort", value: "arrival_time")
@@ -111,7 +130,7 @@ final class MBTAService {
         }
 
         let url = try buildURL(path: "predictions", queryItems: queryItems)
-        let response = try await fetch(PredictionsResponse.self, from: url)
+        let response = try await fetch(PredictionsResponse.self, from: url, routeName: routeName, directionName: directionName, stopName: stopName)
         let now = Date()
         let vehicleIDs = response.data.compactMap { $0.relationships?.vehicle?.data?.id }
         let vehiclesByID = try await fetchVehicles(ids: vehicleIDs)
