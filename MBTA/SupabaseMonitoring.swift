@@ -25,30 +25,6 @@ final class SupabaseMonitoring {
     
     private init() {}
     
-    /// Test Supabase connection - call this manually to debug
-    func testConnection() {
-        Task {
-            print("🧪 Testing Supabase connection...")
-            print("🧪 Device ID: \(deviceID)")
-            print("🧪 URL: \(supabaseURL)/rest/v1/api_logs")
-
-            do {
-                try await sendLog(
-                    endpoint: "test_connection",
-                    statusCode: 200,
-                    responseTimeMs: 0,
-                    routeName: "TEST",
-                    directionName: "TEST",
-                    stopName: "TEST",
-                    source: "debug"
-                )
-                print("🧪 Supabase test log sent successfully")
-            } catch {
-                print("🧪 Supabase test failed: \(error.localizedDescription)")
-            }
-        }
-    }
-    
     /// Log MBTA API call using direct HTTP POST
     func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "app") {
         // Fire and forget - use detached task that won't be cancelled

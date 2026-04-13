@@ -93,9 +93,13 @@ struct ContentView: View {
             .navigationDestination(isPresented: $isShowingAbout) {
                 AboutView()
             }
-            .onAppear {
-                // Test Supabase - remove after debugging
-                SupabaseMonitoring.shared.testConnection()
+            .onOpenURL { url in
+                // Handle widget deep link
+                if url.scheme == "mbta-widget", url.host == "open" {
+                    Task {
+                        await viewModel.loadFromWidget(url: url)
+                    }
+                }
             }
         }
     }
@@ -546,15 +550,16 @@ struct ContentView: View {
                                     .frame(width: 95, height: 22)
                                 
                                 HStack {
-                                    // Route badge on left
-                                    Text(viewModel.selectedRoute?.displayName ?? "39")
+                                    // Route badge on left - now uses proper route colors
+                                    let routeName = viewModel.selectedRoute?.id ?? "39"
+                                    Text(routeName.displayRouteName)
                                         .font(.system(size: 7, weight: .bold))
-                                        .foregroundColor(.black)
+                                        .foregroundColor(routeName.routeTextColor)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 3)
                                         .background(
                                             RoundedRectangle(cornerRadius: 4)
-                                                .fill(.yellow)
+                                                .fill(routeName.routeBadgeColor)
                                         )
                                         .padding(.leading, 4)
                                     
@@ -1481,6 +1486,9 @@ private struct WidgetCustomizationView: View {
 }
 
 private struct AboutView: View {
+    @State private var isShowingWhatItDoes = false
+    @State private var isShowingAboutApp = false
+    
     var body: some View {
         ZStack {
             LinearGradient(
@@ -1495,74 +1503,125 @@ private struct AboutView: View {
             
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 16) {
-                    Button {
-                        if let url = URL(string: "about:blank") {
-                            // Show about info (could be a sheet or alert)
-                        }
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.blue)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("About MBTA Widgets")
+                    // What the app does button
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button {
+                            withAnimation(.spring(response: 0.3)) {
+                                isShowingWhatItDoes.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "list.bullet.clipboard")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.blue)
+                                
+                                Text("What the app does")
                                     .font(.system(size: 17, weight: .semibold))
                                     .foregroundColor(.primary)
                                 
-                                Text("MBTA Widgets is built to make your daily commute easier by showing real-time bus and train arrivals directly on your iPhone without needing to open an app. Just glance at your Home Screen, Lock Screen, or Dynamic Island and instantly know when your next ride is coming.")
-                                    .font(.system(size: 14))
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .rotationEffect(.degrees(isShowingWhatItDoes ? 90 : 0))
+                            }
+                            .padding(18)
+                            .background {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.white.opacity(0.8))
+                                    .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                        .background {
+                        .buttonStyle(.plain)
+                        
+                        if isShowingWhatItDoes {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("• Real-time MBTA arrivals for buses, trains, and subway lines")
+                                Text("• Home Screen widgets for quick access")
+                                Text("• Lock Screen and Live Activity support with Dynamic Island updates")
+                                Text("• Live previews so you can see exactly how your widget will look")
+                                Text("• Save your favorite routes and stops")
+                                Text("• Time-based widgets that change throughout the day")
+                            }
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            
+                            Text("Why it exists:")
+                                .font(.system(size: 15, weight: .semibold))
+                                .padding(.top, 8)
+                            
+                            Text("This app is designed for commuters who want fast, reliable information with zero friction. No clutter, no extra steps — just the data you need.")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                            
+                            Text("Data source:")
+                                .font(.system(size: 15, weight: .semibold))
+                                .padding(.top, 8)
+                            
+                            Text("All transit data is provided by the official MBTA public API.")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(isShowingWhatItDoes ? 18 : 0)
+                    .background {
+                        if isShowingWhatItDoes {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(.white.opacity(0.8))
                                 .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                     
+                    // About this app button
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("What the app does:")
-                            .font(.system(size: 15, weight: .semibold))
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("• Real-time MBTA arrivals for buses, trains, and subway lines")
-                            Text("• Home Screen widgets for quick access")
-                            Text("• Lock Screen and Live Activity support with Dynamic Island updates")
-                            Text("• Live previews so you can see exactly how your widget will look")
-                            Text("• Save your favorite routes and stops")
-                            Text("• Time-based widgets that change throughout the day")
+                        Button {
+                            withAnimation(.spring(response: 0.3)) {
+                                isShowingAboutApp.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "app.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.green)
+                                
+                                Text("About this app")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundColor(.primary)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                    .rotationEffect(.degrees(isShowingAboutApp ? 90 : 0))
+                            }
+                            .padding(18)
+                            .background {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.white.opacity(0.8))
+                                    .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                            }
                         }
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .buttonStyle(.plain)
                         
-                        Text("Why it exists:")
-                            .font(.system(size: 15, weight: .semibold))
-                            .padding(.top, 8)
-                        
-                        Text("This app is designed for commuters who want fast, reliable information with zero friction. No clutter, no extra steps — just the data you need.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                        
-                        Text("Data source:")
-                            .font(.system(size: 15, weight: .semibold))
-                            .padding(.top, 8)
-                        
-                        Text("All transit data is provided by the official MBTA public API.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
+                        if isShowingAboutApp {
+                            Text("MBTA Widgets is built to make your daily commute easier by showing real-time bus and train arrivals directly on your iPhone without needing to open an app. Just glance at your Home Screen, Lock Screen, or Dynamic Island and instantly know when your next ride is coming.")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .padding(18)
+                    .padding(isShowingAboutApp ? 18 : 0)
                     .background {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.white.opacity(0.8))
-                            .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                        if isShowingAboutApp {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(.white.opacity(0.8))
+                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                        }
                     }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                     
                     Button {
                         if let url = URL(string: "https://docs.google.com/forms/d/e/1FAIpQLSetMU7XgiDaOgMJXtlMQVteH796sDNcNeviN-cikIC2CuRFAA/viewform?usp=header") {
@@ -1759,6 +1818,70 @@ private struct PrivacyPolicyView: View {
                 .fill(.white.opacity(0.8))
                 .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
         }
+    }
+}
+
+// MARK: - String Extensions for Route Colors
+private extension String {
+    var routeBadgeColor: Color {
+        let route = self.uppercased()
+        
+        // Bus - Yellow
+        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+            return .yellow
+        }
+        
+        // Subway lines
+        if route.contains("RED") {
+            return Color(red: 218/255, green: 41/255, blue: 28/255) // MBTA Red
+        } else if route.contains("ORANGE") {
+            return Color(red: 237/255, green: 139/255, blue: 0/255) // MBTA Orange
+        } else if route.contains("BLUE") {
+            return Color(red: 0/255, green: 115/255, blue: 207/255) // MBTA Blue
+        } else if route.contains("GREEN") || route == "B" || route == "C" || route == "D" || route == "E" {
+            return Color(red: 0/255, green: 132/255, blue: 61/255) // MBTA Green
+        } else if route.contains("MATTAPAN") {
+            return Color(red: 218/255, green: 41/255, blue: 28/255)
+        }
+        
+        return .gray
+    }
+    
+    var routeTextColor: Color {
+        let route = self.uppercased()
+        
+        // Bus routes - black text on yellow
+        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+            return .black
+        }
+        
+        // All subway lines - white text
+        return .white
+    }
+    
+    var displayRouteName: String {
+        let route = self.uppercased()
+        
+        // Subway lines show abbreviation
+        if route.contains("RED") {
+            return "RL"
+        } else if route.contains("ORANGE") {
+            return "OL"
+        } else if route.contains("BLUE") {
+            return "BL"
+        } else if route.contains("GREEN") && !route.contains("-") {
+            return "GL"
+        } else if route.contains("GREEN-B") || route == "B" {
+            return "B"
+        } else if route.contains("GREEN-C") || route == "C" {
+            return "C"
+        } else if route.contains("GREEN-D") || route == "D" {
+            return "D"
+        } else if route.contains("GREEN-E") || route == "E" {
+            return "E"
+        }
+        
+        return self
     }
 }
 
