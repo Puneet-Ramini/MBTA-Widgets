@@ -13,6 +13,16 @@ public struct BusArrivalAttributes: ActivityAttributes {
             self.minutesAway = minutesAway
             self.stopsAway = stopsAway
         }
+        
+        /// Minutes computed from arrivalTime for live countdown
+        public var minutesFromArrival: Int {
+            max(0, Int(arrivalTime.timeIntervalSinceNow / 60))
+        }
+        
+        public var minutesText: String {
+            let mins = minutesFromArrival
+            return mins < 1 ? "Now" : "\(mins) min"
+        }
     }
     
     public let routeName: String

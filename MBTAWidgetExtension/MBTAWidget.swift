@@ -379,6 +379,16 @@ struct MBTAWidgetEntryView: View {
                 }
                 
                 Spacer(minLength: 0)
+                
+                // Last updated timestamp
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Updated")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Text(entry.date, style: .time)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
             }
 
             if let message = entry.message {
@@ -443,6 +453,7 @@ struct MBTAWidgetEntryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.background, for: .widget)
+        .widgetURL(URL(string: "mbta-widget://open?route=\(entry.routeName)&stop=\(entry.stopName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
     }
 }
 
@@ -690,14 +701,28 @@ struct SmallFavoriteWidgetView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Route badge
-            Text(entry.routeName.displayRouteName)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(entry.routeName.routeTextColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(entry.routeName.routeBadgeColor)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack(alignment: .top) {
+                // Route badge
+                Text(entry.routeName.displayRouteName)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(entry.routeName.routeTextColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(entry.routeName.routeBadgeColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                
+                Spacer()
+                
+                // Reload indicator
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("Updated")
+                        .font(.system(size: 7, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Text(entry.date, style: .time)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
             
             // Direction
             Text(entry.directionLine)
@@ -741,6 +766,7 @@ struct SmallFavoriteWidgetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.background, for: .widget)
+        .widgetURL(URL(string: "mbta-widget://open?route=\(entry.routeName)&stop=\(entry.stopName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
     }
 }
 
@@ -815,7 +841,7 @@ struct BusArrivalLiveActivity: Widget {
                     Spacer()
                     
                     VStack(spacing: 2) {
-                        Text("\(context.state.minutesAway) min")
+                        Text(context.state.minutesText)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                         
@@ -858,7 +884,7 @@ struct BusArrivalLiveActivity: Widget {
                 
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(spacing: 4) {
-                        Text("\(context.state.minutesAway)")
+                        Text("\(context.state.minutesFromArrival)")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.white)
                         Text("min")
@@ -879,15 +905,10 @@ struct BusArrivalLiveActivity: Widget {
                     .background(context.attributes.routeName.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } compactTrailing: {
-                HStack(spacing: 2) {
-                    Text("\(context.state.minutesAway)")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("m")
-                        .font(.system(size: 11, weight: .semibold))
-                        .baselineOffset(1)
-                }
+                Text(context.state.minutesText)
+                    .font(.system(size: 13, weight: .bold))
             } minimal: {
-                Text("\(context.state.minutesAway)")
+                Text("\(context.state.minutesFromArrival)")
                     .font(.system(size: 11, weight: .bold))
             }
         }
@@ -1054,6 +1075,10 @@ private struct WidgetStoredFavorite: Decodable {
 
 // MARK: - Widget Supabase Logging
 private enum WidgetSupabaseLogger {
+    // Hardcode the values for widget extension since it can't access main bundle
+    private static let supabaseURL = "https://ifooqfgcpeczamayyzja.supabase.co"
+    private static let supabaseKey = "sb_publishable_woKkE6OsLhUo7KaJLxvUSQ_RuV2-oI6"
+    
     static var deviceID: String {
         let defaults = UserDefaults(suiteName: "group.Widgets.MBTA")
         if let existing = defaults?.string(forKey: "deviceID") {
@@ -1065,63 +1090,9 @@ private enum WidgetSupabaseLogger {
     }
     
     static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, source: String = "widget") {
-        Task {
-            // Full analytics structure with proper column mapping
-            struct APILog: Codable {
-                let endpoint: String
-                let statusCode: Int?
-                let responseTimeMs: Int?
-                let source: String
-                let timestamp: String
-                let deviceId: String
-                
-                enum CodingKeys: String, CodingKey {
-                    case endpoint
-                    case statusCode = "status_code"
-                    case responseTimeMs = "response_time_ms"
-                    case source
-                    case timestamp
-                    case deviceId = "device_id"
-                }
-            }
-            
-            let log = APILog(
-                endpoint: endpoint,
-                statusCode: statusCode,
-                responseTimeMs: responseTimeMs,
-                source: source,
-                timestamp: ISO8601DateFormatter().string(from: Date()),
-                deviceId: deviceID
-            )
-            
-            guard let url = URL(string: "\(SupabaseConfig.url.absoluteString)/rest/v1/api_logs"),
-                  let jsonData = try? JSONEncoder().encode(log) else {
-                print("❌ Widget Supabase: Failed to encode")
-                return
-            }
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(SupabaseConfig.publishableKey, forHTTPHeaderField: "apikey")
-            request.addValue("Bearer \(SupabaseConfig.publishableKey)", forHTTPHeaderField: "Authorization")
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("return=minimal", forHTTPHeaderField: "Prefer")
-            request.httpBody = jsonData
-            
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    print("Widget Supabase: \(httpResponse.statusCode) for \(endpoint)")
-                    if !(200...299).contains(httpResponse.statusCode) {
-                        if let responseText = String(data: data, encoding: .utf8) {
-                            print("Widget Supabase Error: \(responseText)")
-                        }
-                    }
-                }
-            } catch {
-                print("Widget Supabase network error: \(error)")
-            }
-        }
+        // Simplified - just skip Supabase logging for now
+        // The issue is widgets can't reliably make network calls
+        // Use local logging instead via WidgetAPIUsageStore
     }
 }
 

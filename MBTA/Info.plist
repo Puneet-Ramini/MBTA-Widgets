@@ -6,7 +6,9 @@
 	<string>https://ifooqfgcpeczamayyzja.supabase.co</string>
 	<key>SupabasePublishableKey</key>
 	<string>sb_publishable_woKkE6OsLhUo7KaJLxvUSQ_RuV2-oI6</string>
-	<key>NSSupports​Live​Activities</key>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
 </dict>
 </plist>

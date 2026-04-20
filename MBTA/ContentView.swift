@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var isShowingWidgetCustomization = false
     @State private var isShowingAbout = false
     @Namespace private var glassNamespace
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -99,6 +100,12 @@ struct ContentView: View {
                     Task {
                         await viewModel.loadFromWidget(url: url)
                     }
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    // Re-fetch arrivals when app returns to foreground
+                    viewModel.handleReturnToForeground()
                 }
             }
         }

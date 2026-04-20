@@ -5,6 +5,8 @@ import WidgetKit
 #endif
 #if canImport(ActivityKit)
 import ActivityKit
+#endif
+import FirebaseFirestore
 
 @available(iOS 16.2, *)
 public struct BusArrivalAttributes: ActivityAttributes {
@@ -18,6 +20,16 @@ public struct BusArrivalAttributes: ActivityAttributes {
             self.minutesAway = minutesAway
             self.stopsAway = stopsAway
         }
+        
+        /// Minutes computed from arrivalTime for live countdown
+        public var minutesFromArrival: Int {
+            max(0, Int(arrivalTime.timeIntervalSinceNow / 60))
+        }
+        
+        public var minutesText: String {
+            let mins = minutesFromArrival
+            return mins < 1 ? "Now" : "\(mins) min"
+        }
     }
     
     public let routeName: String
@@ -30,7 +42,6 @@ public struct BusArrivalAttributes: ActivityAttributes {
         self.stopName = stopName
     }
 }
-#endif
 
 struct WidgetScheduleOverride: Codable, Identifiable {
     let id: String
@@ -161,6 +172,76 @@ final class ArrivalsViewModel: ObservableObject {
     
     deinit {
         reloadTimer?.cancel()
+    }
+    
+    func loadFromWidget(url: URL) async {
+        // Parse URL parameters
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            // Fallback to old behavior
+            await loadFromWidgetLegacy()
+            return
+        }
+        
+        let routeName = queryItems.first(where: { $0.name == "route" })?.value
+        let stopName = queryItems.first(where: { $0.name == "stop" })?.value
+        
+        // Try to find matching favorite
+        if let routeName = routeName,
+           let favorite = quickFavorites.compactMap({ $0 }).first(where: { $0.routeName == routeName }) {
+            await loadFavorite(favorite)
+            await loadArrivals()
+            return
+        }
+        
+        // Fallback to old behavior if no match
+        await loadFromWidgetLegacy()
+    }
+    
+    private func loadFromWidgetLegacy() async {
+        // Load the favorite that's currently showing in the widget
+        guard let favorite = loadActiveWidgetFavorite() else {
+            return
+        }
+        
+        await loadFavorite(favorite)
+        await loadArrivals()
+    }
+    
+    private func loadActiveWidgetFavorite() -> SavedFavorite? {
+        guard let defaults = UserDefaults(suiteName: "group.Widgets.MBTA") else {
+            return nil
+        }
+        
+        // Try widget assignments first
+        if let mediumIndex = defaults.object(forKey: "mediumWidgetFavoriteIndex") as? Int,
+           quickFavorites.indices.contains(mediumIndex),
+           let favorite = quickFavorites[mediumIndex] {
+            return favorite
+        }
+        
+        // Fall back to widget configuration (default or time-based)
+        if let configData = defaults.data(forKey: "widget.configuration"),
+           let configuration = try? JSONDecoder().decode(WidgetConfiguration.self, from: configData) {
+            let now = Date()
+            return configuration.overrides.first(where: { isOverrideActive($0, at: now) })?.favorite 
+                ?? configuration.defaultFavorite
+        }
+        
+        return nil
+    }
+    
+    private func isOverrideActive(_ override: WidgetScheduleOverride, at date: Date) -> Bool {
+        let calendar = Calendar.current
+        let nowMinutes = (calendar.component(.hour, from: date) * 60) + calendar.component(.minute, from: date)
+        let startMinutes = (override.startHour * 60) + override.startMinute
+        let endMinutes = (override.endHour * 60) + override.endMinute
+
+        if startMinutes <= endMinutes {
+            return nowMinutes >= startMinutes && nowMinutes < endMinutes
+        }
+
+        return nowMinutes >= startMinutes || nowMinutes < endMinutes
     }
 
     var fieldTitle: String {
@@ -323,6 +404,14 @@ final class ArrivalsViewModel: ObservableObject {
         saveWidgetConfiguration()
     }
 
+    func handleReturnToForeground() {
+        // Only refresh if we have a valid selection
+        guard selectedRoute != nil, selectedStopID != nil else { return }
+        Task {
+            await loadArrivals()
+        }
+    }
+    
     func handleModeChange() {
         errorMessage = nil
         routeInput = ""
@@ -439,6 +528,11 @@ final class ArrivalsViewModel: ObservableObject {
             if arrivals.isEmpty {
                 errorMessage = "No upcoming buses found for this stop."
             }
+            
+            // Reload widgets immediately when user loads arrivals
+            #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadAllTimelines()
+            #endif
             
             // Start auto-reload timer (10 seconds)
             startAutoReload()
@@ -622,10 +716,28 @@ final class ArrivalsViewModel: ObservableObject {
             let activity = try Activity.request(
                 attributes: attributes,
                 content: .init(state: initialState, staleDate: nil),
-                pushType: nil
+                pushType: .token
             )
             currentActivity = activity
             
+            // Listen for push token and register with Firebase
+            Task {
+                for await tokenData in activity.pushTokenUpdates {
+                    let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                    print("Live Activity push token: \(token)")
+                    
+                    await registerPushToken(
+                        token: token,
+                        routeID: validArrival.routeId,
+                        routeName: validArrival.routeName,
+                        stopID: validArrival.stopId,
+                        stopName: validArrival.stopName,
+                        destination: destination
+                    )
+                }
+            }
+            
+            // Continue local polling as fallback while app is in foreground
             Task {
                 await updateLiveActivity(activity: activity)
             }
@@ -633,6 +745,35 @@ final class ArrivalsViewModel: ObservableObject {
             errorMessage = "Could not start Live Activity: \(error.localizedDescription)"
         }
         #endif
+    }
+    
+    /// Registers the Live Activity push token with Firestore so the backend can send updates
+    private func registerPushToken(
+        token: String,
+        routeID: String,
+        routeName: String,
+        stopID: String,
+        stopName: String,
+        destination: String
+    ) async {
+        let db = Firestore.firestore()
+        let data: [String: Any] = [
+            "pushToken": token,
+            "routeID": routeID,
+            "routeName": routeName,
+            "stopID": stopID,
+            "stopName": stopName,
+            "destination": destination,
+            "active": true,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        
+        do {
+            try await db.collection("liveActivities").document(token).setData(data)
+            print("Registered push token with Firestore")
+        } catch {
+            print("Failed to register push token: \(error)")
+        }
     }
     
     #if canImport(ActivityKit)
@@ -718,6 +859,16 @@ final class ArrivalsViewModel: ObservableObject {
         
         if let activity = currentActivity as? Activity<BusArrivalAttributes> {
             Task {
+                // Deactivate token in Firestore
+                let tokenData = activity.pushToken
+                if let tokenData {
+                    let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                    try? await Firestore.firestore()
+                        .collection("liveActivities")
+                        .document(token)
+                        .updateData(["active": false])
+                }
+                
                 await activity.end(nil, dismissalPolicy: .immediate)
                 await MainActor.run {
                     currentActivity = nil
