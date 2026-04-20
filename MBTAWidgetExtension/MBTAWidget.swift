@@ -323,7 +323,7 @@ struct MBTAWidgetProvider: TimelineProvider {
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
-                    minutesText: "\(minutes) min",
+                    minutesText: minutes < 1 ? "Now" : "\(minutes) min",
                     stopsAwayText: state.mode.showsStopsAway ? arrival.stopsAwayText : ""
                 )
             },
@@ -341,7 +341,7 @@ struct MBTAWidgetProvider: TimelineProvider {
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(date) / 60), 0)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
-                    minutesText: "\(minutes) min",
+                    minutesText: minutes < 1 ? "Now" : "\(minutes) min",
                     stopsAwayText: mode.showsStopsAway ? arrival.stopsAwayText : ""
                 )
             }
@@ -671,7 +671,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
-                    minutesText: "\(minutes) min",
+                    minutesText: minutes < 1 ? "Now" : "\(minutes) min",
                     stopsAwayText: ""
                 )
             },
@@ -689,7 +689,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(date) / 60), 0)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
-                    minutesText: "\(minutes) min",
+                    minutesText: minutes < 1 ? "Now" : "\(minutes) min",
                     stopsAwayText: ""
                 )
             }
@@ -884,12 +884,18 @@ struct BusArrivalLiveActivity: Widget {
                 
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(spacing: 4) {
-                        Text("\(context.state.minutesFromArrival)")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(.white)
-                        Text("min")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
+                        if context.state.minutesFromArrival < 1 {
+                            Text("Now")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(.white)
+                        } else {
+                            Text("\(context.state.minutesFromArrival)")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.white)
+                            Text("min")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -908,7 +914,7 @@ struct BusArrivalLiveActivity: Widget {
                 Text(context.state.minutesText)
                     .font(.system(size: 13, weight: .bold))
             } minimal: {
-                Text("\(context.state.minutesFromArrival)")
+                Text(context.state.minutesText)
                     .font(.system(size: 11, weight: .bold))
             }
         }

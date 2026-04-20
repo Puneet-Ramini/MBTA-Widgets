@@ -534,7 +534,7 @@ final class ArrivalsViewModel: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
             #endif
             
-            // Start auto-reload timer (10 seconds)
+            // Start auto-reload timer (30 seconds)
             startAutoReload()
         } catch {
             errorMessage = "Failed to load arrival times."
@@ -547,7 +547,7 @@ final class ArrivalsViewModel: ObservableObject {
         reloadTimer?.cancel()
         reloadTimer = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
                 await loadArrivalsQuietly()
             }
         }
@@ -782,13 +782,13 @@ final class ArrivalsViewModel: ObservableObject {
         var isFirstIteration = true
         
         while !Task.isCancelled {
-            // Wait 10 seconds before API call (skip on first iteration)
+            // Wait 30 seconds before API call (skip on first iteration)
             if !isFirstIteration {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
             isFirstIteration = false
             
-            // Fetch fresh data from API every 10 seconds
+            // Fetch fresh data from API every 30 seconds
             guard let routeID = selectedRoute?.id,
                   let stopID = selectedStopID else {
                 break
