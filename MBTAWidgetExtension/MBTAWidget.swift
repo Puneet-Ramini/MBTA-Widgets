@@ -859,6 +859,7 @@ struct BusArrivalLiveActivity: Widget {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .widgetURL(Self.liveActivityDeepLink(routeName: context.attributes.routeName, stopName: context.attributes.stopName))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -884,18 +885,9 @@ struct BusArrivalLiveActivity: Widget {
                 
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(spacing: 4) {
-                        if context.state.minutesFromArrival < 1 {
-                            Text("Now")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.white)
-                        } else {
-                            Text("\(context.state.minutesFromArrival)")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                            Text("min")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.8))
-                        }
+                        Text(context.state.minutesText)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -913,11 +905,24 @@ struct BusArrivalLiveActivity: Widget {
             } compactTrailing: {
                 Text(context.state.minutesText)
                     .font(.system(size: 13, weight: .bold))
+                    .frame(minWidth: 36)
             } minimal: {
                 Text(context.state.minutesText)
                     .font(.system(size: 11, weight: .bold))
             }
+            .widgetURL(Self.liveActivityDeepLink(routeName: context.attributes.routeName, stopName: context.attributes.stopName))
         }
+    }
+    
+    private static func liveActivityDeepLink(routeName: String, stopName: String) -> URL {
+        var components = URLComponents()
+        components.scheme = "mbta-widget"
+        components.host = "open"
+        components.queryItems = [
+            URLQueryItem(name: "route", value: routeName),
+            URLQueryItem(name: "stop", value: stopName)
+        ]
+        return components.url!
     }
 }
 #endif

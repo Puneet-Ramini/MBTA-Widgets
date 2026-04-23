@@ -158,6 +158,8 @@ final class ArrivalsViewModel: ObservableObject {
     @Published var isLoadingArrivals: Bool = false
     @Published var errorMessage: String? = nil
     @Published var currentActivity: Any? = nil
+    /// The direction ID used for the active Live Activity, so we can filter predictions correctly
+    private var liveActivityDirectionID: Int? = nil
     
     private var reloadTimer: Task<Void, Never>?
 
@@ -501,13 +503,21 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let predictions = try await MBTAService.shared.fetchPredictions(
+            let allPredictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
+
+            // Filter by selected direction so subway/rail stops only show the chosen direction
+            let predictions: [BusArrival]
+            if let dirID = selectedDirectionID {
+                predictions = allPredictions.filter { $0.directionId == dirID }
+            } else {
+                predictions = allPredictions
+            }
 
             arrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
@@ -526,7 +536,7 @@ final class ArrivalsViewModel: ObservableObject {
             }
 
             if arrivals.isEmpty {
-                errorMessage = "No upcoming buses found for this stop."
+                errorMessage = "No upcoming arrivals found for this stop."
             }
             
             // Reload widgets immediately when user loads arrivals
@@ -565,13 +575,21 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let predictions = try await MBTAService.shared.fetchPredictions(
+            let allPredictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
+
+            // Filter by selected direction so subway/rail stops only show the chosen direction
+            let predictions: [BusArrival]
+            if let dirID = selectedDirectionID {
+                predictions = allPredictions.filter { $0.directionId == dirID }
+            } else {
+                predictions = allPredictions
+            }
 
             arrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
@@ -685,12 +703,19 @@ final class ArrivalsViewModel: ObservableObject {
         }
     }
     
-    func startLiveActivity() {
+    func startLiveActivity(arrivalIndex: Int? = nil) {
         #if canImport(ActivityKit)
         guard #available(iOS 16.2, *) else { return }
         
-        // Find first arrival with minutes > 0
-        guard let validArrival = arrivals.first(where: { ($0.minutesAway ?? 0) > 0 }),
+        // Use the specified arrival index, or fall back to first arrival with minutes > 0
+        let validArrival: BusArrival?
+        if let index = arrivalIndex, index < arrivals.count {
+            validArrival = arrivals[index]
+        } else {
+            validArrival = arrivals.first(where: { ($0.minutesAway ?? 0) > 0 })
+        }
+        
+        guard let validArrival,
               let minutesAway = validArrival.minutesAway,
               let arrivalTime = validArrival.arrivalTime ?? validArrival.departureTime else {
             errorMessage = "No upcoming arrivals"
@@ -712,15 +737,24 @@ final class ArrivalsViewModel: ObservableObject {
             stopsAway: stopsAway
         )
         
+        // Store direction for filtering during updates
+        liveActivityDirectionID = selectedDirectionID
+        
         do {
+            // Set stale date to 2 minutes from now so system knows to check for updates
+            let staleDate = Date().addingTimeInterval(120)
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: initialState, staleDate: nil),
+                content: .init(state: initialState, staleDate: staleDate),
                 pushType: .token
             )
             currentActivity = activity
             
-            // Listen for push token and register with Firebase
+            // Always register push token for background updates via Firebase
+            let pushStopID = selectedStopID ?? validArrival.stopId
+            let pushStopName = selectedStop?.name ?? validArrival.stopName
+            let pushRouteID = selectedRoute?.id ?? validArrival.routeId
+            let pushRouteName = selectedRoute?.displayName ?? validArrival.routeName
             Task {
                 for await tokenData in activity.pushTokenUpdates {
                     let token = tokenData.map { String(format: "%02x", $0) }.joined()
@@ -728,18 +762,20 @@ final class ArrivalsViewModel: ObservableObject {
                     
                     await registerPushToken(
                         token: token,
-                        routeID: validArrival.routeId,
-                        routeName: validArrival.routeName,
-                        stopID: validArrival.stopId,
-                        stopName: validArrival.stopName,
-                        destination: destination
+                        routeID: pushRouteID,
+                        routeName: pushRouteName,
+                        stopID: pushStopID,
+                        stopName: pushStopName,
+                        destination: destination,
+                        directionID: self.liveActivityDirectionID,
+                        trackedArrivalTime: arrivalTime
                     )
                 }
             }
             
             // Continue local polling as fallback while app is in foreground
             Task {
-                await updateLiveActivity(activity: activity)
+                await updateLiveActivity(activity: activity, trackedArrivalTime: arrivalTime)
             }
         } catch {
             errorMessage = "Could not start Live Activity: \(error.localizedDescription)"
@@ -754,10 +790,12 @@ final class ArrivalsViewModel: ObservableObject {
         routeName: String,
         stopID: String,
         stopName: String,
-        destination: String
+        destination: String,
+        directionID: Int? = nil,
+        trackedArrivalTime: Date? = nil
     ) async {
         let db = Firestore.firestore()
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "pushToken": token,
             "routeID": routeID,
             "routeName": routeName,
@@ -767,6 +805,12 @@ final class ArrivalsViewModel: ObservableObject {
             "active": true,
             "createdAt": FieldValue.serverTimestamp()
         ]
+        if let directionID {
+            data["directionID"] = directionID
+        }
+        if let trackedArrivalTime {
+            data["trackedArrivalTime"] = Int(trackedArrivalTime.timeIntervalSince1970)
+        }
         
         do {
             try await db.collection("liveActivities").document(token).setData(data)
@@ -778,52 +822,118 @@ final class ArrivalsViewModel: ObservableObject {
     
     #if canImport(ActivityKit)
     @available(iOS 16.2, *)
-    private func updateLiveActivity(activity: Activity<BusArrivalAttributes>) async {
-        var isFirstIteration = true
+    private func updateLiveActivity(activity: Activity<BusArrivalAttributes>, trackedArrivalTime: Date) async {
+        // Track the arrival time we're following; allow it to shift slightly between API calls
+        var currentTrackedTime = trackedArrivalTime
+        let trackedDirectionID = liveActivityDirectionID
+        
+        // Capture route/stop at start so polling survives UI changes
+        let capturedRouteID = selectedRoute?.id
+        let capturedStopID = selectedStopID
+        
+        // Schedule a repeating timer that fires even briefly in background
+        // to re-render the Live Activity with fresh minutesText
+        let timerTask = Task { @MainActor in
+            let timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
+                Task {
+                    let freshState = BusArrivalAttributes.ContentState(
+                        arrivalTime: currentTrackedTime,
+                        minutesAway: max(0, Int(currentTrackedTime.timeIntervalSinceNow / 60)),
+                        stopsAway: activity.content.state.stopsAway
+                    )
+                    await activity.update(.init(state: freshState, staleDate: Date().addingTimeInterval(60)))
+                }
+            }
+            RunLoop.current.add(timer, forMode: .common)
+            // Keep timer alive until this task is cancelled
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            timer.invalidate()
+        }
         
         while !Task.isCancelled {
-            // Wait 30 seconds before API call (skip on first iteration)
-            if !isFirstIteration {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-            }
-            isFirstIteration = false
+            // Always wait before fetching — initial data is already set by startLiveActivity
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
             
-            // Fetch fresh data from API every 30 seconds
-            guard let routeID = selectedRoute?.id,
-                  let stopID = selectedStopID else {
+            // Use captured values so we keep polling even if user navigates away in UI
+            let routeID = capturedRouteID ?? selectedRoute?.id
+            let stopID = capturedStopID ?? selectedStopID
+            
+            guard let routeID, let stopID else {
                 break
             }
             
             do {
                 let predictions = try await MBTAService.shared.fetchPredictions(stopId: stopID, routeId: routeID)
                 
-                // Get first arrival with minutes > 0
-                guard let validPrediction = predictions.first(where: { ($0.minutesAway ?? 0) > 0 }),
-                      let newArrivalTime = validPrediction.arrivalTime ?? validPrediction.departureTime,
-                      let newMinutesAway = validPrediction.minutesAway else {
+                // Filter by direction to avoid matching wrong-direction trains at shared stops
+                let directionalPredictions: [BusArrival]
+                if let dirID = trackedDirectionID {
+                    directionalPredictions = predictions.filter { $0.directionId == dirID }
+                } else {
+                    directionalPredictions = predictions
+                }
+                
+                // Find the prediction closest to the tracked arrival time (within 5 min tolerance)
+                let validPrediction = directionalPredictions
+                    .filter { $0.minutesAway != nil }
+                    .filter {
+                        let time = $0.arrivalTime ?? $0.departureTime ?? .distantFuture
+                        return abs(time.timeIntervalSince(currentTrackedTime)) < 300 // 5 min tolerance
+                    }
+                    .min(by: { a, b in
+                        let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
+                        let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
+                        return abs(aTime.timeIntervalSince(currentTrackedTime)) < abs(bTime.timeIntervalSince(currentTrackedTime))
+                    })
+                
+                // If exact match fails, fall back to the first upcoming prediction in the right direction
+                let bestPrediction = validPrediction ?? directionalPredictions.first(where: { ($0.minutesAway ?? -1) >= 0 })
+                
+                guard let bestPrediction,
+                      let newArrivalTime = bestPrediction.arrivalTime ?? bestPrediction.departureTime,
+                      let newMinutesAway = bestPrediction.minutesAway else {
                     // No more arrivals, end activity
+                    timerTask.cancel()
                     await activity.end(nil, dismissalPolicy: .immediate)
                     await MainActor.run {
                         currentActivity = nil
+                        liveActivityDirectionID = nil
                     }
                     break
                 }
+                
+                // Update tracked time to follow any slight API shifts
+                currentTrackedTime = newArrivalTime
                 
                 // Update Live Activity with fresh data
                 let updatedState = BusArrivalAttributes.ContentState(
                     arrivalTime: newArrivalTime,
                     minutesAway: newMinutesAway,
-                    stopsAway: validPrediction.stopsAway ?? 0
+                    stopsAway: bestPrediction.stopsAway ?? 0
                 )
                 
-                await activity.update(.init(state: updatedState, staleDate: nil))
+                await activity.update(.init(state: updatedState, staleDate: Date().addingTimeInterval(120)))
                 
-                // Update local arrivals in the app too
+                // Auto-dismiss: if arrival is within 1 minute or has passed, wait 60s then end
+                if newMinutesAway <= 1 || newArrivalTime.timeIntervalSinceNow < 60 {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    timerTask.cancel()
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                    await MainActor.run {
+                        currentActivity = nil
+                        liveActivityDirectionID = nil
+                    }
+                    break
+                }
+                
+                // Update local arrivals in the app too (use direction-filtered predictions)
                 await MainActor.run {
                     let routeName = selectedRoute?.displayName ?? routeID
                     let stop = selectedStop
                     
-                    arrivals = Array(predictions.prefix(3)).map { arrival in
+                    arrivals = Array(directionalPredictions.prefix(3)).map { arrival in
                         BusArrival(
                             id: arrival.id,
                             routeId: arrival.routeId,
@@ -846,10 +956,7 @@ final class ArrivalsViewModel: ObservableObject {
         }
         
         // Cleanup
-        await activity.end(nil, dismissalPolicy: .immediate)
-        await MainActor.run {
-            currentActivity = nil
-        }
+        timerTask.cancel()
     }
     #endif
     
@@ -872,6 +979,7 @@ final class ArrivalsViewModel: ObservableObject {
                 await activity.end(nil, dismissalPolicy: .immediate)
                 await MainActor.run {
                     currentActivity = nil
+                    liveActivityDirectionID = nil
                 }
             }
         }

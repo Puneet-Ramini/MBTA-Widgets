@@ -10,27 +10,50 @@ import SwiftUI
 import WidgetKit
 #endif
 
+// MARK: - Liquid Glass helper (iOS 26+)
+extension View {
+    @ViewBuilder
+    func liquidGlassCard(cornerRadius: CGFloat = 16) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                )
+        }
+    }
+    
+    @ViewBuilder
+    func liquidGlassPill() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive())
+        } else {
+            self
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+        }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = ArrivalsViewModel()
     @State private var isShowingFavoritePicker = false
     @State private var isShowingWidgetCustomization = false
     @State private var isShowingAbout = false
-    @Namespace private var glassNamespace
+    @State private var isPickingPrediction = false
+    @State private var selectedPredictionArrivalTime: Date? = nil
+    @State private var showIslandHint = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
             ZStack {
-                // Modern gradient background
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.95, green: 0.96, blue: 0.98),
-                        Color(red: 0.92, green: 0.94, blue: 0.97)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
                 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -45,38 +68,69 @@ struct ContentView: View {
                                 )
                             )
                             .padding(.top, -8)
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
 
                         quickRoutesSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         modeSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         routeSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         directionSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         stopSelectorSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         statusSection
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         resultsSection
                         widgetButton
                             .padding(.bottom, 8)
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         
                         supportButton
                             .padding(.bottom, 8)
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                         
                         aboutButton
                             .padding(.bottom, 20)
+                            .blur(radius: isPickingPrediction ? 6 : 0)
+                            .allowsHitTesting(!isPickingPrediction)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                 }
                 .refreshable {
+                    guard !isPickingPrediction else { return }
                     await viewModel.loadArrivals()
                 }
+                .scrollDisabled(isPickingPrediction)
+                
+
             }
             .onChange(of: viewModel.selectedStopID) { _, _ in
                 viewModel.saveWidgetSelection()
+                selectedPredictionArrivalTime = nil
+                isPickingPrediction = false
                 guard viewModel.selectedStopID != nil else {
                     return
                 }
 
                 Task {
                     await viewModel.loadArrivals()
+                }
+            }
+            .onChange(of: viewModel.currentActivity == nil) { _, isNil in
+                if isNil {
+                    selectedPredictionArrivalTime = nil
                 }
             }
             .confirmationDialog("Save to Favorite", isPresented: $isShowingFavoritePicker, titleVisibility: .visible) {
@@ -114,7 +168,7 @@ struct ContentView: View {
     private var quickRoutesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Quick Access")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.5)
@@ -123,6 +177,7 @@ struct ContentView: View {
                 HStack(spacing: 12) {
                     ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { index, favorite in
                         Button {
+                            haptic()
                             Task {
                                 await viewModel.handleQuickRouteTap(at: index)
                             }
@@ -141,22 +196,21 @@ struct ContentView: View {
                             .padding(.vertical, 10)
                             .background {
                                 if isQuickRouteSelected(favorite) {
-                                    LinearGradient(
-                                        colors: [Color.blue, Color.blue.opacity(0.8)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
+                                    Capsule()
+                                        .fill(Color.blue)
                                 } else {
-                                    Color.white.opacity(0.7)
+                                    Capsule()
+                                        .fill(Color(.secondarySystemGroupedBackground))
                                 }
                             }
                             .clipShape(Capsule())
-                            .shadow(color: isQuickRouteSelected(favorite) ? .blue.opacity(0.3) : .black.opacity(0.06), radius: 8, y: 4)
+                            .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
                         }
                         .buttonStyle(.plain)
                     }
 
                     Button {
+                        haptic()
                         isShowingFavoritePicker = true
                     } label: {
                         HStack(spacing: 6) {
@@ -168,9 +222,7 @@ struct ContentView: View {
                         .foregroundColor(.blue)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.7))
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                        .liquidGlassPill()
                     }
                     .buttonStyle(.plain)
                 }
@@ -182,7 +234,7 @@ struct ContentView: View {
     private var modeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Transport Mode")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.5)
@@ -190,6 +242,7 @@ struct ContentView: View {
             Menu {
                 ForEach(TransportMode.allCases) { mode in
                     Button {
+                        haptic()
                         viewModel.selectedMode = mode
                         viewModel.handleModeChange()
                     } label: {
@@ -218,8 +271,8 @@ struct ContentView: View {
                 .padding(16)
                 .background {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(.white.opacity(0.8))
-                        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
             }
         }
@@ -237,7 +290,7 @@ struct ContentView: View {
     private var busInputSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(viewModel.fieldTitle)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.5)
@@ -249,8 +302,8 @@ struct ContentView: View {
                 .padding(16)
                 .background {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(.white.opacity(0.8))
-                        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
                 .onSubmit {
                     Task {
@@ -271,7 +324,7 @@ struct ContentView: View {
     private var presetLineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(viewModel.fieldTitle)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.5)
@@ -279,6 +332,7 @@ struct ContentView: View {
             Menu {
                 ForEach(viewModel.presetLines) { line in
                     Button {
+                        haptic()
                         viewModel.selectPresetLine(line)
                         if line.query != "Green" {
                             Task {
@@ -317,8 +371,8 @@ struct ContentView: View {
                 .padding(16)
                 .background {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(.white.opacity(0.8))
-                        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
                 .overlay(alignment: .trailing) {
                     if viewModel.isLoadingRoute {
@@ -334,6 +388,7 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     ForEach(viewModel.greenLineBranches) { branch in
                         Button(branch.title) {
+                            haptic()
                             viewModel.selectGreenBranch(branch)
                             Task {
                                 await viewModel.loadRoute()
@@ -373,7 +428,7 @@ struct ContentView: View {
         if !viewModel.directions.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Direction")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -385,6 +440,7 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: viewModel.selectedDirectionID) { _, newValue in
+                    haptic()
                     guard let directionID = newValue else {
                         return
                     }
@@ -402,6 +458,7 @@ struct ContentView: View {
         Menu {
             ForEach(viewModel.stops) { stop in
                 Button(stop.name) {
+                    haptic()
                     viewModel.selectedStopID = stop.id
                     viewModel.saveWidgetSelection()
                 }
@@ -409,7 +466,7 @@ struct ContentView: View {
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Stop")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -434,8 +491,8 @@ struct ContentView: View {
                 .padding(16)
                 .background {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(.white.opacity(0.8))
-                        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
             }
         }
@@ -469,6 +526,7 @@ struct ContentView: View {
                     Spacer()
                     
                     Button {
+                        haptic()
                         Task {
                             await viewModel.loadArrivals()
                         }
@@ -479,8 +537,8 @@ struct ContentView: View {
                             .padding(8)
                             .background {
                                 Circle()
-                                    .fill(.white.opacity(0.9))
-                                    .shadow(color: .blue.opacity(0.2), radius: 6, y: 3)
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
                             }
                     }
                     .disabled(viewModel.isLoadingArrivals)
@@ -492,60 +550,135 @@ struct ContentView: View {
                         value: viewModel.isLoadingArrivals
                     )
                 }
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
 
                 HStack(alignment: .top, spacing: 12) {
-                    ForEach(displayedArrivals) { arrival in
-                        VStack(spacing: 6) {
-                            VStack(spacing: 4) {
-                                Text(arrival.minutesAway.map { "\($0)" } ?? "--")
-                                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                                    .foregroundStyle(
-                                        LinearGradient(
-                                            colors: arrival.minutesAway != nil ? [.blue, .blue.opacity(0.8)] : [.gray, .gray.opacity(0.6)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
+                    ForEach(Array(displayedArrivals.enumerated()), id: \.element.id) { index, arrival in
+                        Button {
+                            guard isPickingPrediction else { return }
+                            guard arrival.minutesAway != nil, index < viewModel.arrivals.count else {
+                                haptic()
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    isPickingPrediction = false
+                                }
+                                return
+                            }
+                            haptic()
+                            let trackedTime = arrival.arrivalTime ?? arrival.departureTime
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                selectedPredictionArrivalTime = trackedTime
+                                isPickingPrediction = false
+                            }
+                            viewModel.startLiveActivity(arrivalIndex: index)
+                            
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showIslandHint = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showIslandHint = false
+                                }
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                VStack(spacing: 4) {
+                                    Text(arrival.minutesAway.map { "\($0)" } ?? "--")
+                                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: arrival.minutesAway != nil ? [.blue, .blue.opacity(0.8)] : [.gray, .gray.opacity(0.6)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
                                         )
-                                    )
-                                
-                                Text("min")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background {
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(.white.opacity(0.9))
-                                    .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
-                            }
+                                    
+                                    Text("min")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color(.secondarySystemGroupedBackground))
+                                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                                }
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(.black, lineWidth: isSelectedArrival(arrival) ? 2 : 0)
+                                )
+                                .scaleEffect(isPickingPrediction && arrival.minutesAway != nil ? 1.08 : 1.0)
 
-                            VStack(spacing: 2) {
-                                if let stopsText = stopsAwayText(for: arrival.stopsAway) {
-                                    Text(stopsText)
+                                VStack(spacing: 2) {
+                                    if let stopsText = stopsAwayText(for: arrival.stopsAway) {
+                                        Text(stopsText)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    } else {
+                                        Text(" ")
+                                            .font(.system(size: 11, weight: .medium))
+                                    }
+
+                                    Text(arrivalTimeText(for: arrival))
                                         .font(.system(size: 11, weight: .medium))
                                         .foregroundColor(.secondary)
                                         .lineLimit(1)
-                                } else {
-                                    Text(" ")
-                                        .font(.system(size: 11, weight: .medium))
                                 }
-
-                                Text(arrivalTimeText(for: arrival))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
                             }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.plain)
                     }
+                }
+                
+                // "Pick an arrival" hint during selection mode
+                if isPickingPrediction {
+                    HStack {
+                        Text("Tap an arrival to show on Dynamic Island")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.blue)
+                        
+                        Spacer()
+                        
+                        Button {
+                            haptic()
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                isPickingPrediction = false
+                            }
+                        } label: {
+                            Text("Cancel")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                
+                // Inline hint after send-to-island animation
+                if showIslandHint {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.green)
+                        Text("Visible on Dynamic Island after exiting app")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 
                 if !viewModel.arrivals.isEmpty {
                     Button {
+                        haptic(.medium)
                         if viewModel.currentActivity != nil {
                             viewModel.stopLiveActivity()
+                            selectedPredictionArrivalTime = nil
                         } else {
-                            viewModel.startLiveActivity()
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                isPickingPrediction = true
+                            }
                         }
                     } label: {
                         HStack(spacing: 10) {
@@ -630,23 +763,35 @@ struct ContentView: View {
                             Spacer()
                             
                             Image(systemName: viewModel.currentActivity != nil ? "xmark.circle.fill" : "arrow.right.circle.fill")
-                                .font(.system(size: 18, weight: .medium))
+                                .font(.system(size: 20, weight: .medium))
                                 .foregroundColor(viewModel.currentActivity != nil ? .red : .blue)
                         }
                         .padding(14)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+                                .fill(viewModel.currentActivity != nil
+                                      ? Color(.secondarySystemGroupedBackground)
+                                      : Color.blue.opacity(0.1))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                        }
+                        .overlay {
+                            if viewModel.currentActivity == nil {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                            }
                         }
                     }
+                    .blur(radius: isPickingPrediction ? 6 : 0)
+                    .allowsHitTesting(!isPickingPrediction)
                 }
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isPickingPrediction)
         }
     }
 
     private var widgetButton: some View {
         Button {
+            haptic()
             isShowingWidgetCustomization = true
         } label: {
             HStack(spacing: 14) {
@@ -665,16 +810,13 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.white.opacity(0.8))
-                    .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
-            }
+            .liquidGlassCard()
         }
     }
     
     private var supportButton: some View {
         Button {
+            haptic()
             if let url = URL(string: "https://www.buymeacoffee.com/puneetramini") {
                 UIApplication.shared.open(url)
             }
@@ -694,16 +836,13 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.white.opacity(0.8))
-                    .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
-            }
+            .liquidGlassCard()
         }
     }
     
     private var aboutButton: some View {
         Button {
+            haptic()
             isShowingAbout = true
         } label: {
             HStack(spacing: 14) {
@@ -722,11 +861,7 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.white.opacity(0.8))
-                    .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
-            }
+            .liquidGlassCard()
         }
     }
 
@@ -815,6 +950,32 @@ struct ContentView: View {
         destination
             .replacingOccurrences(of: " Station", with: "")
             .replacingOccurrences(of: " station", with: "")
+    }
+
+    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+    
+    /// Returns true only for the single arrival closest to the tracked selection time (within 5 min).
+    /// This ensures exactly one arrival card is highlighted, even when arrivals shift on refresh.
+    private func isSelectedArrival(_ arrival: BusArrival) -> Bool {
+        guard let selectedTime = selectedPredictionArrivalTime,
+              (arrival.arrivalTime ?? arrival.departureTime) != nil else {
+            return false
+        }
+        // Find the displayed arrival closest to the tracked time within a 5-minute window
+        let candidates = viewModel.arrivals.filter { a in
+            guard let t = a.arrivalTime ?? a.departureTime else { return false }
+            return abs(t.timeIntervalSince(selectedTime)) < 300
+        }
+        guard let best = candidates.min(by: { a, b in
+            let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
+            let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
+            return abs(aTime.timeIntervalSince(selectedTime)) < abs(bTime.timeIntervalSince(selectedTime))
+        }) else {
+            return false
+        }
+        return best.id == arrival.id
     }
 
     private var displayedArrivals: [BusArrival] {
@@ -917,18 +1078,15 @@ private struct WidgetCustomizationView: View {
     @State private var smallWidget1FavoriteIndex: Int? = nil
     @State private var smallWidget2FavoriteIndex: Int? = nil
 
+    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
     var body: some View {
         ZStack {
             // Modern gradient background
-            LinearGradient(
-                colors: [
-                    Color(red: 0.95, green: 0.96, blue: 0.98),
-                    Color(red: 0.92, green: 0.94, blue: 0.97)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
@@ -1000,6 +1158,7 @@ private struct WidgetCustomizationView: View {
                 Spacer()
 
                 Button(editingDefault ? "Done" : "Edit") {
+                    haptic()
                     withAnimation(.spring(response: 0.3)) {
                         editingDefault.toggle()
                     }
@@ -1018,9 +1177,9 @@ private struct WidgetCustomizationView: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(.white.opacity(0.9))
-                        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
 
             if editingDefault {
@@ -1035,9 +1194,9 @@ private struct WidgetCustomizationView: View {
         }
         .padding(20)
         .background {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.7))
-                .shadow(color: .black.opacity(0.06), radius: 15, y: 8)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
 
@@ -1063,6 +1222,7 @@ private struct WidgetCustomizationView: View {
             }
 
             Button {
+                haptic()
                 withAnimation(.spring(response: 0.3)) {
                     viewModel.addWidgetOverride()
                     expandedOverrideID = viewModel.widgetOverrides.last?.id
@@ -1079,18 +1239,18 @@ private struct WidgetCustomizationView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(.white.opacity(0.9))
-                        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .background {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.7))
-                .shadow(color: .black.opacity(0.06), radius: 15, y: 8)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
 
@@ -1115,6 +1275,7 @@ private struct WidgetCustomizationView: View {
 
                 HStack(spacing: 12) {
                     Button(expandedOverrideID == override.id ? "Done" : "Edit") {
+                        haptic()
                         withAnimation(.spring(response: 0.3)) {
                             expandedOverrideID = expandedOverrideID == override.id ? nil : override.id
                         }
@@ -1123,6 +1284,7 @@ private struct WidgetCustomizationView: View {
                     .foregroundColor(.blue)
 
                     Button {
+                        haptic(.medium)
                         withAnimation(.spring(response: 0.3)) {
                             viewModel.deleteWidgetOverride(id: override.id)
                             if expandedOverrideID == override.id {
@@ -1161,7 +1323,7 @@ private struct WidgetCustomizationView: View {
                         .padding(12)
                         .background {
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(.white.opacity(0.8))
+                                .fill(Color(.tertiarySystemGroupedBackground))
                         }
                     }
 
@@ -1181,7 +1343,7 @@ private struct WidgetCustomizationView: View {
                         .padding(12)
                         .background {
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(.white.opacity(0.8))
+                                .fill(Color(.tertiarySystemGroupedBackground))
                         }
                     }
                 }
@@ -1191,14 +1353,15 @@ private struct WidgetCustomizationView: View {
         .padding(16)
         .background {
             RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.95))
-                .shadow(color: .black.opacity(0.04), radius: 10, y: 5)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
 
     private var instructionsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
+                haptic()
                 withAnimation(.spring(response: 0.3)) {
                     isShowingInstructions.toggle()
                 }
@@ -1236,9 +1399,9 @@ private struct WidgetCustomizationView: View {
         .font(.subheadline)
         .padding(20)
         .background {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.7))
-                .shadow(color: .black.opacity(0.06), radius: 15, y: 8)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
     
@@ -1271,12 +1434,14 @@ private struct WidgetCustomizationView: View {
                 
                 Menu {
                     Button("None") {
+                        haptic()
                         mediumWidgetFavoriteIndex = nil
                         saveWidgetAssignments()
                     }
                     ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { index, favorite in
                         if favorite != nil {
                             Button(favoriteSummary(favorite) ?? "Favorite \(index + 1)") {
+                                haptic()
                                 mediumWidgetFavoriteIndex = index
                                 saveWidgetAssignments()
                             }
@@ -1295,7 +1460,7 @@ private struct WidgetCustomizationView: View {
                     .padding(12)
                     .background {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.white.opacity(0.9))
+                            .fill(Color(.tertiarySystemGroupedBackground))
                     }
                 }
             }
@@ -1312,12 +1477,14 @@ private struct WidgetCustomizationView: View {
                 
                 Menu {
                     Button("None") {
+                        haptic()
                         smallWidget1FavoriteIndex = nil
                         saveWidgetAssignments()
                     }
                     ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { index, favorite in
                         if favorite != nil {
                             Button(favoriteSummary(favorite) ?? "Favorite \(index + 1)") {
+                                haptic()
                                 smallWidget1FavoriteIndex = index
                                 saveWidgetAssignments()
                             }
@@ -1336,7 +1503,7 @@ private struct WidgetCustomizationView: View {
                     .padding(12)
                     .background {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.white.opacity(0.9))
+                            .fill(Color(.tertiarySystemGroupedBackground))
                     }
                 }
             }
@@ -1353,12 +1520,14 @@ private struct WidgetCustomizationView: View {
                 
                 Menu {
                     Button("None") {
+                        haptic()
                         smallWidget2FavoriteIndex = nil
                         saveWidgetAssignments()
                     }
                     ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { index, favorite in
                         if favorite != nil {
                             Button(favoriteSummary(favorite) ?? "Favorite \(index + 1)") {
+                                haptic()
                                 smallWidget2FavoriteIndex = index
                                 saveWidgetAssignments()
                             }
@@ -1377,16 +1546,16 @@ private struct WidgetCustomizationView: View {
                     .padding(12)
                     .background {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.white.opacity(0.9))
+                            .fill(Color(.tertiarySystemGroupedBackground))
                     }
                 }
             }
         }
         .padding(20)
         .background {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.7))
-                .shadow(color: .black.opacity(0.06), radius: 15, y: 8)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
     
@@ -1407,8 +1576,8 @@ private struct WidgetCustomizationView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(.white.opacity(0.7))
-                    .shadow(color: .black.opacity(0.06), radius: 15, y: 8)
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
             }
     }
 
@@ -1439,6 +1608,7 @@ private struct WidgetCustomizationView: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { _, favorite in
                 Button {
+                    haptic()
                     action(favorite)
                 } label: {
                     HStack {
@@ -1448,7 +1618,7 @@ private struct WidgetCustomizationView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.75))
+                    .background(Color(.secondarySystemGroupedBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
@@ -1495,24 +1665,22 @@ private struct WidgetCustomizationView: View {
 private struct AboutView: View {
     @State private var isShowingWhatItDoes = false
     @State private var isShowingAboutApp = false
+
+    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
     
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.95, green: 0.96, blue: 0.98),
-                    Color(red: 0.92, green: 0.94, blue: 0.97)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 16) {
                     // What the app does button
                     VStack(alignment: .leading, spacing: 12) {
                         Button {
+                            haptic()
                             withAnimation(.spring(response: 0.3)) {
                                 isShowingWhatItDoes.toggle()
                             }
@@ -1536,8 +1704,8 @@ private struct AboutView: View {
                             .padding(18)
                             .background {
                                 RoundedRectangle(cornerRadius: 16)
-                                    .fill(.white.opacity(0.8))
-                                    .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1575,8 +1743,8 @@ private struct AboutView: View {
                     .background {
                         if isShowingWhatItDoes {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -1584,6 +1752,7 @@ private struct AboutView: View {
                     // About this app button
                     VStack(alignment: .leading, spacing: 12) {
                         Button {
+                            haptic()
                             withAnimation(.spring(response: 0.3)) {
                                 isShowingAboutApp.toggle()
                             }
@@ -1607,8 +1776,8 @@ private struct AboutView: View {
                             .padding(18)
                             .background {
                                 RoundedRectangle(cornerRadius: 16)
-                                    .fill(.white.opacity(0.8))
-                                    .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1624,13 +1793,14 @@ private struct AboutView: View {
                     .background {
                         if isShowingAboutApp {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     
                     Button {
+                        haptic()
                         if let url = URL(string: "https://docs.google.com/forms/d/e/1FAIpQLSetMU7XgiDaOgMJXtlMQVteH796sDNcNeviN-cikIC2CuRFAA/viewform?usp=header") {
                             UIApplication.shared.open(url)
                         }
@@ -1653,8 +1823,8 @@ private struct AboutView: View {
                         .padding(18)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
                     
@@ -1677,12 +1847,13 @@ private struct AboutView: View {
                         .padding(18)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
                     
                     Button {
+                        haptic()
                         if let url = URL(string: "https://www.buymeacoffee.com/puneetramini") {
                             UIApplication.shared.open(url)
                         }
@@ -1704,8 +1875,8 @@ private struct AboutView: View {
                         .padding(18)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(.white.opacity(0.8))
-                                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
                 }
@@ -1721,15 +1892,8 @@ private struct AboutView: View {
 private struct PrivacyPolicyView: View {
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.95, green: 0.96, blue: 0.98),
-                    Color(red: 0.92, green: 0.94, blue: 0.97)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
@@ -1822,8 +1986,8 @@ private struct PrivacyPolicyView: View {
         .padding(16)
         .background {
             RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.8))
-                .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         }
     }
 }
@@ -1833,9 +1997,9 @@ private extension String {
     var routeBadgeColor: Color {
         let route = self.uppercased()
         
-        // Bus - Yellow
+        // Bus - Bright amber/gold for visibility on black pill
         if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
-            return .yellow
+            return Color(red: 255/255, green: 200/255, blue: 0/255)
         }
         
         // Subway lines
