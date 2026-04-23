@@ -707,6 +707,9 @@ final class ArrivalsViewModel: ObservableObject {
         #if canImport(ActivityKit)
         guard #available(iOS 16.2, *) else { return }
         
+        // End any existing Live Activity and deactivate its Firestore token
+        stopLiveActivity()
+        
         // Use the specified arrival index, or fall back to first arrival with minutes > 0
         let validArrival: BusArrival?
         if let index = arrivalIndex, index < arrivals.count {
