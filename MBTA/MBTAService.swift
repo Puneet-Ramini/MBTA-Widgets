@@ -98,6 +98,24 @@ final class MBTAService {
         throw URLError(.fileDoesNotExist)
     }
 
+    /// Fetches all routes for a given transport mode.
+    func fetchAllRoutes(mode: TransportMode) async throws -> [Route] {
+        let url = try buildURL(
+            path: "routes",
+            queryItems: [URLQueryItem(name: "filter[type]", value: mode.routeTypeFilterValue)]
+        )
+        let response = try await fetch(RoutesResponse.self, from: url)
+        return response.data.map { route in
+            Route(
+                id: route.id,
+                shortName: route.attributes.shortName,
+                longName: route.attributes.longName,
+                directionNames: route.attributes.directionNames,
+                directionDestinations: route.attributes.directionDestinations
+            )
+        }
+    }
+
     /// Loads the stops for one route and one direction so the stop picker only shows relevant boarding stops.
     func fetchStops(routeId: String, directionId: Int) async throws -> [BusStop] {
         let url = try buildURL(

@@ -158,10 +158,25 @@ final class ArrivalsViewModel: ObservableObject {
     @Published var isLoadingArrivals: Bool = false
     @Published var errorMessage: String? = nil
     @Published var currentActivity: Any? = nil
+    @Published var allBusRoutes: [Route] = []
     /// The direction ID used for the active Live Activity, so we can filter predictions correctly
     private var liveActivityDirectionID: Int? = nil
     
     private var reloadTimer: Task<Void, Never>?
+    
+    /// Filtered bus route suggestions based on current input
+    var routeSuggestions: [Route] {
+        let query = routeInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty, selectedMode == .bus else { return [] }
+        return allBusRoutes.filter { route in
+            let name = route.displayName.lowercased()
+            let id = route.id.lowercased()
+            return name.hasPrefix(query) || id.hasPrefix(query) ||
+                   name.contains(query) || id.contains(query)
+        }
+        .prefix(8)
+        .map { $0 }
+    }
 
     var selectedStop: BusStop? {
         stops.first { $0.id == selectedStopID }
@@ -170,6 +185,21 @@ final class ArrivalsViewModel: ObservableObject {
     init() {
         loadQuickRoutes()
         loadWidgetConfiguration()
+        Task {
+            await loadAllBusRoutes()
+        }
+    }
+    
+    func loadAllBusRoutes() async {
+        guard allBusRoutes.isEmpty else { return }
+        do {
+            let routes = try await MBTAService.shared.fetchAllRoutes(mode: .bus)
+            await MainActor.run {
+                allBusRoutes = routes
+            }
+        } catch {
+            // Non-critical, autocomplete just won't work
+        }
     }
     
     deinit {
@@ -266,6 +296,20 @@ final class ArrivalsViewModel: ObservableObject {
         selectedMode.greenLineBranches
     }
 
+    func selectSuggestedRoute(_ route: Route) async {
+        errorMessage = nil
+        arrivals = []
+        stops = []
+        selectedStopID = nil
+        directions = []
+        selectedDirectionID = nil
+        
+        selectedRoute = route
+        directions = route.directionOptions
+        routeInput = route.displayName
+        saveWidgetSelection()
+    }
+    
     func loadRoute() async {
         errorMessage = nil
         arrivals = []
@@ -467,7 +511,19 @@ final class ArrivalsViewModel: ObservableObject {
         isLoadingStops = true
 
         do {
-            stops = try await MBTAService.shared.fetchStops(routeId: routeID, directionId: directionID)
+            var allStops = try await MBTAService.shared.fetchStops(routeId: routeID, directionId: directionID)
+            
+            // Route 39: only show stops between Forest Hills and Back Bay
+            if routeID == "39" {
+                let boundaryIDs: Set<String> = ["place-forhl", "place-bbsta"]
+                if let firstIdx = allStops.firstIndex(where: { boundaryIDs.contains($0.id) }),
+                   let lastIdx = allStops.lastIndex(where: { boundaryIDs.contains($0.id) }),
+                   firstIdx <= lastIdx {
+                    allStops = Array(allStops[firstIdx...lastIdx])
+                }
+            }
+            
+            stops = allStops
             selectedStopID = stops.first?.id
             saveWidgetSelection()
         } catch {

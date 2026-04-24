@@ -195,16 +195,10 @@ struct ContentView: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background {
-                                if isQuickRouteSelected(favorite) {
-                                    Capsule()
-                                        .fill(Color.blue)
-                                } else {
-                                    Capsule()
-                                        .fill(Color(.secondarySystemGroupedBackground))
-                                }
+                                Capsule()
+                                    .fill(isQuickRouteSelected(favorite) ? Color.blue : Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
                             }
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
                         }
                         .buttonStyle(.plain)
                     }
@@ -318,6 +312,44 @@ struct ContentView: View {
                             .padding(.trailing, 16)
                     }
                 }
+            
+            // Autocomplete suggestions
+            if !viewModel.routeSuggestions.isEmpty && viewModel.selectedRoute == nil {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.routeSuggestions) { route in
+                        Button {
+                            haptic()
+                            Task {
+                                await viewModel.selectSuggestedRoute(route)
+                            }
+                        } label: {
+                            HStack {
+                                Text(route.displayName)
+                                    .font(.system(size: 15, weight: .semibold))
+                                if let longName = route.longName, !longName.isEmpty,
+                                   longName != route.displayName {
+                                    Text(longName)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if route.id != viewModel.routeSuggestions.last?.id {
+                            Divider().padding(.leading, 16)
+                        }
+                    }
+                }
+                .background {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                }
+            }
         }
     }
 
@@ -1089,12 +1121,29 @@ private struct WidgetCustomizationView: View {
                 .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Helper text if no favorites exist
+                    if viewModel.quickFavorites.compactMap({ $0 }).isEmpty {
+                        HStack(spacing: 10) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.yellow)
+                            Text("Create a favorite from the home screen to enable widgets")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.tertiarySystemGroupedBackground))
+                        }
+                    }
+                    
                     defaultWidgetSection
                     timeOverrideSection
                     widgetAssignmentSection
                     instructionsSection
-                    betaSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
@@ -1167,8 +1216,8 @@ private struct WidgetCustomizationView: View {
                 .foregroundColor(.blue)
             }
 
-            Text("This route shows all day unless a time override is active.")
-                .font(.system(size: 15))
+            Text("Shows all day unless a time override is active.")
+                .font(.system(size: 14))
                 .foregroundColor(.secondary)
 
             Text(favoriteSummary(viewModel.widgetDefaultFavorite))
@@ -1213,8 +1262,8 @@ private struct WidgetCustomizationView: View {
                     .tracking(0.5)
             }
 
-            Text("When the current time falls inside one of these ranges, the widget shows that route instead of the default route.")
-                .font(.system(size: 15))
+            Text("Override the default route during specific times.")
+                .font(.system(size: 14))
                 .foregroundColor(.secondary)
 
             ForEach(viewModel.widgetOverrides) { override in
@@ -1418,8 +1467,8 @@ private struct WidgetCustomizationView: View {
                     .tracking(0.5)
             }
             
-            Text("Choose which quick access favorite each widget should display.")
-                .font(.system(size: 15))
+            Text("Assign a favorite to each widget on your home screen.")
+                .font(.system(size: 14))
                 .foregroundColor(.secondary)
             
             // Medium Widget Assignment
