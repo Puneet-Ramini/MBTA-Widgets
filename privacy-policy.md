@@ -76,8 +76,6 @@ Used for temporary storage and processing of Live Activity updates
 Used for anonymous analytics and performance monitoring
 •	Google Forms
 Used for optional user feedback submission
-•	Buy Me a Coffee
-Used for optional user support and donations
  
 12. Children’s Privacy
 This app is not directed to children under the age of 13. We do not knowingly collect any personal data from children.
