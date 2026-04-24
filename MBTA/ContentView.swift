@@ -724,16 +724,23 @@ struct ContentView: View {
                                 HStack {
                                     // Route badge on left - now uses proper route colors
                                     let routeName = viewModel.selectedRoute?.id ?? "39"
-                                    Text(routeName.displayRouteName)
-                                        .font(.system(size: 7, weight: .bold))
-                                        .foregroundColor(routeName.routeTextColor)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 3)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 4)
-                                                .fill(routeName.routeBadgeColor)
-                                        )
-                                        .padding(.leading, 4)
+                                    if routeName.isCommuterRail {
+                                        Image(systemName: "train.side.front.car")
+                                            .font(.system(size: 8, weight: .semibold))
+                                            .foregroundColor(.purple)
+                                            .padding(.leading, 6)
+                                    } else {
+                                        Text(routeName.displayRouteName)
+                                            .font(.system(size: 7, weight: .bold))
+                                            .foregroundColor(routeName.routeTextColor)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 3)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(routeName.routeBadgeColor)
+                                            )
+                                            .padding(.leading, 4)
+                                    }
                                     
                                     Spacer()
                                     
@@ -1946,7 +1953,7 @@ private struct PrivacyPolicyView: View {
             
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Effective Date: 04/11/2026")
+                    Text("Effective Date: 04/23/2026")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                     
@@ -1956,7 +1963,7 @@ private struct PrivacyPolicyView: View {
                     
                     privacySection(
                         title: "1. Information We Collect",
-                        content: "We collect limited, non-personal, anonymous data to improve app performance and reliability.\n\nThis includes:\n• A randomly generated anonymous device identifier (UUID)\n• MBTA usage data (such as routes, stops, and directions viewed)\n• API performance data (response times, success/failure rates)\n• App usage timestamps\n• Widget refresh activity"
+                        content: "We collect limited, non-personal, anonymous data to improve app performance, reliability, and real-time features.\n\nThis includes:\n• A randomly generated anonymous device identifier (UUID)\n• MBTA usage data (routes, stops, directions viewed)\n• API performance data (response times, success/failure rates)\n• App usage timestamps\n• Widget refresh activity\n\nFor Live Activities (Dynamic Island / Lock Screen updates), we temporarily collect:\n• APNs push token (used only to deliver Live Activity updates)\n• Route ID and route name\n• Stop ID and stop name\n• Direction ID\n• Destination name\n• Tracked arrival time (timestamp)\n• Server timestamp of activity creation"
                     )
                     
                     privacySection(
@@ -1966,51 +1973,56 @@ private struct PrivacyPolicyView: View {
                     
                     privacySection(
                         title: "3. How We Use Information",
-                        content: "We use collected data to:\n• Monitor MBTA API performance and reliability\n• Identify and fix bugs\n• Improve app speed and stability\n• Understand general usage patterns (e.g., commonly used routes)"
+                        content: "We use collected data to:\n• Deliver real-time transit updates via widgets and Live Activities\n• Monitor MBTA API performance and reliability\n• Identify and fix bugs\n• Improve app speed and stability\n• Understand general usage patterns (e.g., commonly used routes)"
                     )
                     
                     privacySection(
                         title: "4. Data Storage and Processing",
-                        content: "• Data is stored securely using Supabase (cloud database provider)\n• The device identifier is anonymous and cannot be linked to your identity\n• Data is not sold, rented, or shared for marketing purposes\n• Data is processed solely to operate and improve the app"
+                        content: "• Anonymous usage data is stored securely using Supabase\n• Live Activity data (including push tokens and transit selections) is stored temporarily using Firebase\n• Push tokens are used only for Live Activity updates and are deactivated when no longer valid or when the activity ends\n• Data is not sold, rented, or shared for marketing purposes\n• Data is processed solely to operate and improve the app"
                     )
                     
                     privacySection(
-                        title: "5. Legal Basis for Processing",
+                        title: "5. Live Activity Processing",
+                        content: "To provide real-time updates:\n• A secure server function periodically fetches transit predictions from the MBTA API\n• Updates are sent to your device via Apple Push Notification service (APNs)\n• This process uses temporary identifiers and does not track user identity"
+                    )
+                    
+                    privacySection(
+                        title: "6. Legal Basis for Processing",
                         content: "We process anonymous usage data based on our legitimate interest in improving app functionality, performance, and user experience."
                     )
                     
                     privacySection(
-                        title: "6. User Rights",
-                        content: "• No account is required to use the app\n• Data collection is anonymous\n• You can stop all data collection by uninstalling the app\n• Because data is anonymous, we cannot reasonably link it to an individual user"
+                        title: "7. User Rights",
+                        content: "• No account is required to use the app\n• Data collection is anonymous\n• You can stop all data collection by uninstalling the app\n• Because data is anonymous, it cannot be linked back to an individual user"
                     )
                     
                     privacySection(
-                        title: "7. Data Retention",
-                        content: "• Anonymous usage data is retained for analytics and performance monitoring\n• No personally identifiable data is stored"
+                        title: "8. Data Retention",
+                        content: "• Anonymous usage data is retained for analytics and performance monitoring\n• Live Activity data (including push tokens) is temporary and removed or deactivated after the activity ends\n• No personally identifiable data is stored"
                     )
                     
                     privacySection(
-                        title: "8. Security",
+                        title: "9. Security",
                         content: "We use industry-standard security measures to protect stored data from unauthorized access, misuse, or disclosure."
                     )
                     
                     privacySection(
-                        title: "9. Third-Party Services",
-                        content: "We use the following external services:\n\n• MBTA API (https://api-v3.mbta.com)\nProvides real-time transit data, including arrival predictions, routes, and stop information\n\n• Supabase\nUsed for secure data storage and analytics\n\n• Google Forms\nUsed for optional user feedback submission\n\n• Buy Me a Coffee\nUsed for optional user support and donations"
+                        title: "10. Third-Party Services",
+                        content: "We use the following external services:\n\n• MBTA API\nProvides real-time transit data including arrival predictions, routes, and stops\n\n• Firebase\nUsed for temporary storage and processing of Live Activity updates\n\n• Supabase\nUsed for anonymous analytics and performance monitoring\n\n• Google Forms\nUsed for optional user feedback submission\n\n• Buy Me a Coffee\nUsed for optional user support and donations"
                     )
                     
                     privacySection(
-                        title: "10. Children's Privacy",
+                        title: "11. Children's Privacy",
                         content: "This app is not directed to children under the age of 13. We do not knowingly collect any personal data from children."
                     )
                     
                     privacySection(
-                        title: "11. Changes to This Policy",
+                        title: "12. Changes to This Policy",
                         content: "We may update this Privacy Policy from time to time. Updates will be reflected by revising the effective date."
                     )
                     
                     privacySection(
-                        title: "12. Contact",
+                        title: "13. Contact",
                         content: "If you have any questions about this Privacy Policy, contact:\nRamini.p@northeastern.edu"
                     )
                 }
@@ -2079,6 +2091,10 @@ private extension String {
         return .white
     }
     
+    var isCommuterRail: Bool {
+        self.uppercased().starts(with: "CR-")
+    }
+    
     var displayRouteName: String {
         let route = self.uppercased()
         
@@ -2099,6 +2115,8 @@ private extension String {
             return "D"
         } else if route.contains("GREEN-E") || route == "E" {
             return "E"
+        } else if route.contains("MATTAPAN") {
+            return "ML"
         }
         
         return self

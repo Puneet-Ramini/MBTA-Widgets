@@ -32,11 +32,13 @@ public struct BusArrivalAttributes: ActivityAttributes {
         }
     }
     
+    public let routeID: String
     public let routeName: String
     public let destination: String
     public let stopName: String
     
-    public init(routeName: String, destination: String, stopName: String) {
+    public init(routeID: String, routeName: String, destination: String, stopName: String) {
+        self.routeID = routeID
         self.routeName = routeName
         self.destination = destination
         self.stopName = stopName
@@ -785,6 +787,7 @@ final class ArrivalsViewModel: ObservableObject {
         let stopsAway = validArrival.stopsAway ?? 0
         
         let attributes = BusArrivalAttributes(
+            routeID: selectedRoute?.id ?? validArrival.routeId,
             routeName: validArrival.routeName,
             destination: destination.isEmpty ? "Arriving" : destination,
             stopName: validArrival.stopName

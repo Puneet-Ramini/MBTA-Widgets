@@ -34,6 +34,8 @@ private extension String {
             return Color(red: 0/255, green: 132/255, blue: 61/255) // MBTA Green
         } else if route.contains("MATTAPAN") {
             return Color(red: 218/255, green: 41/255, blue: 28/255)
+        } else if route.starts(with: "CR-") {
+            return .purple
         }
         
         return .gray
@@ -49,6 +51,10 @@ private extension String {
         
         // All subway lines - white text
         return .white
+    }
+    
+    var isCommuterRail: Bool {
+        self.uppercased().starts(with: "CR-")
     }
     
     var displayRouteName: String {
@@ -71,6 +77,8 @@ private extension String {
             return "D"
         } else if route.contains("GREEN-E") || route == "E" {
             return "E"
+        } else if route.contains("MATTAPAN") {
+            return "ML"
         }
         
         return self
@@ -819,23 +827,29 @@ struct BusArrivalLiveActivity: Widget {
             // Lock Screen & Banner UI
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Text(context.attributes.routeName.displayRouteName)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(context.attributes.routeName.routeTextColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(context.attributes.routeName.routeBadgeColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(context.attributes.destination)
-                            .font(.system(size: 13, weight: .semibold))
-                            .lineLimit(1)
+                    if context.attributes.routeID.isCommuterRail {
+                        Image(systemName: "train.side.front.car")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.purple)
+                    } else {
+                        Text(context.attributes.routeID.displayRouteName)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(context.attributes.routeID.routeTextColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(context.attributes.routeID.routeBadgeColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         
-                        Text(context.attributes.stopName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(context.attributes.destination)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
+                            
+                            Text(context.attributes.stopName)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                     
                     Spacer()
@@ -863,22 +877,28 @@ struct BusArrivalLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 6) {
-                        Text(context.attributes.routeName.displayRouteName)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(context.attributes.routeName.routeTextColor)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(context.attributes.routeName.routeBadgeColor)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("To")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(context.attributes.destination)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
+                    if context.attributes.routeID.isCommuterRail {
+                        Image(systemName: "train.side.front.car")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(.purple)
+                    } else {
+                        HStack(spacing: 6) {
+                            Text(context.attributes.routeID.displayRouteName)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(context.attributes.routeID.routeTextColor)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(context.attributes.routeID.routeBadgeColor)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("To")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text(context.attributes.destination)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .lineLimit(1)
+                            }
                         }
                     }
                 }
@@ -895,13 +915,19 @@ struct BusArrivalLiveActivity: Widget {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             } compactLeading: {
-                Text(context.attributes.routeName.displayRouteName)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(context.attributes.routeName.routeTextColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(context.attributes.routeName.routeBadgeColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                if context.attributes.routeID.isCommuterRail {
+                    Image(systemName: "train.side.front.car")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.purple)
+                } else {
+                    Text(context.attributes.routeID.displayRouteName)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(context.attributes.routeID.routeTextColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(context.attributes.routeID.routeBadgeColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
             } compactTrailing: {
                 Text(context.state.minutesText)
                     .font(.system(size: 13, weight: .bold))
