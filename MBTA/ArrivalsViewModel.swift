@@ -164,6 +164,13 @@ final class ArrivalsViewModel: ObservableObject {
     /// The direction ID used for the active Live Activity, so we can filter predictions correctly
     private var liveActivityDirectionID: Int? = nil
     
+    /// Stored reference to the Live Activity polling task so it isn't deallocated in Release builds
+    private var liveActivityPollingTask: Task<Void, Never>?
+    /// Stored reference to the Live Activity timer task
+    private var liveActivityTimerTask: Task<Void, Never>?
+    /// Shared tracker for Live Activity state between timer and polling loop
+    private var liveActivityTracker: LiveActivityTracker?
+    
     private var reloadTimer: Task<Void, Never>?
     
     /// Filtered bus route suggestions based on current input
@@ -187,6 +194,7 @@ final class ArrivalsViewModel: ObservableObject {
     init() {
         loadQuickRoutes()
         loadWidgetConfiguration()
+        restoreLiveActivitySelectionIfNeeded()
         Task {
             await loadAllBusRoutes()
         }
@@ -458,6 +466,14 @@ final class ArrivalsViewModel: ObservableObject {
         Task {
             await loadArrivals()
         }
+        
+        // Restart Live Activity polling if we have an active activity
+        // (the polling Task dies when iOS suspends the app in the background)
+        #if canImport(ActivityKit)
+        if #available(iOS 16.2, *) {
+            restartLiveActivityPollingIfNeeded()
+        }
+        #endif
     }
     
     func handleModeChange() {
@@ -496,16 +512,17 @@ final class ArrivalsViewModel: ObservableObject {
     }
 
     func selectDirection(_ directionID: Int) async {
+        let previousStopName = selectedStop?.name
         errorMessage = nil
         arrivals = []
         stops = []
         selectedStopID = nil
         selectedDirectionID = directionID
         saveWidgetSelection()
-        await loadStops()
+        await loadStops(preferredStopName: previousStopName)
     }
 
-    func loadStops() async {
+    func loadStops(preferredStopName: String? = nil) async {
         guard let routeID = selectedRoute?.id, let directionID = selectedDirectionID else {
             return
         }
@@ -526,7 +543,14 @@ final class ArrivalsViewModel: ObservableObject {
             }
             
             stops = allStops
-            selectedStopID = stops.first?.id
+            
+            // Try to re-select the same stop by name when switching directions
+            if let preferredName = preferredStopName,
+               let matchingStop = stops.first(where: { $0.name == preferredName }) {
+                selectedStopID = matchingStop.id
+            } else {
+                selectedStopID = stops.first?.id
+            }
             saveWidgetSelection()
         } catch {
             errorMessage = "Could not load stops for that direction."
@@ -768,6 +792,9 @@ final class ArrivalsViewModel: ObservableObject {
         // End any existing Live Activity and deactivate its Firestore token
         stopLiveActivity()
         
+        // Persist the current selection so it survives app relaunch
+        saveLiveActivitySelection()
+        
         // Use the specified arrival index, or fall back to first arrival with minutes > 0
         let validArrival: BusArrival?
         if let index = arrivalIndex, index < arrivals.count {
@@ -835,10 +862,16 @@ final class ArrivalsViewModel: ObservableObject {
                 }
             }
             
-            // Continue local polling as fallback while app is in foreground
-            Task {
-                await updateLiveActivity(activity: activity, trackedArrivalTime: arrivalTime)
-            }
+            // Start local polling — stored as instance properties so Tasks survive in Release builds
+            let tracker = LiveActivityTracker(
+                trackedTime: arrivalTime,
+                stopsAway: stopsAway,
+                directionID: liveActivityDirectionID,
+                routeID: selectedRoute?.id ?? validArrival.routeId,
+                stopID: selectedStopID ?? validArrival.stopId
+            )
+            liveActivityTracker = tracker
+            startPollingAndTimer(activity: activity, tracker: tracker)
         } catch {
             errorMessage = "Could not start Live Activity: \(error.localizedDescription)"
         }
@@ -882,149 +915,215 @@ final class ArrivalsViewModel: ObservableObject {
         }
     }
     
+    /// Shared mutable state for Live Activity polling, using a reference type
+    /// so both the timer closure and the polling loop see the same values
+    /// regardless of Swift compiler optimizations in Release builds.
+    private class LiveActivityTracker {
+        var currentTrackedTime: Date
+        var latestStopsAway: Int
+        let directionID: Int?
+        let routeID: String
+        let stopID: String
+        
+        init(trackedTime: Date, stopsAway: Int, directionID: Int?, routeID: String, stopID: String) {
+            self.currentTrackedTime = trackedTime
+            self.latestStopsAway = stopsAway
+            self.directionID = directionID
+            self.routeID = routeID
+            self.stopID = stopID
+        }
+    }
+    
     #if canImport(ActivityKit)
     @available(iOS 16.2, *)
-    private func updateLiveActivity(activity: Activity<BusArrivalAttributes>, trackedArrivalTime: Date) async {
-        // Track the arrival time we're following; allow it to shift slightly between API calls
-        var currentTrackedTime = trackedArrivalTime
-        let trackedDirectionID = liveActivityDirectionID
+    private func restartLiveActivityPollingIfNeeded() {
+        guard let activity = currentActivity as? Activity<BusArrivalAttributes> else { return }
         
-        // Capture route/stop at start so polling survives UI changes
-        let capturedRouteID = selectedRoute?.id
-        let capturedStopID = selectedStopID
+        // If the polling task is still running, nothing to do
+        if let existing = liveActivityPollingTask, !existing.isCancelled {
+            return
+        }
         
-        // Schedule a repeating timer that fires even briefly in background
-        // to re-render the Live Activity with fresh minutesText
-        let timerTask = Task { @MainActor in
+        // Use existing tracker's arrival time, or fall back to the activity's current state
+        let trackedTime = liveActivityTracker?.currentTrackedTime ?? activity.content.state.arrivalTime
+        let stopsAway = liveActivityTracker?.latestStopsAway ?? activity.content.state.stopsAway
+        
+        let routeID = liveActivityTracker?.routeID ?? selectedRoute?.id ?? activity.attributes.routeID
+        let stopID = liveActivityTracker?.stopID ?? selectedStopID ?? ""
+        let directionID = liveActivityTracker?.directionID ?? liveActivityDirectionID
+        
+        guard !stopID.isEmpty else { return }
+        
+        let tracker = LiveActivityTracker(
+            trackedTime: trackedTime,
+            stopsAway: stopsAway,
+            directionID: directionID,
+            routeID: routeID,
+            stopID: stopID
+        )
+        liveActivityTracker = tracker
+        
+        startPollingAndTimer(activity: activity, tracker: tracker)
+    }
+    
+    @available(iOS 16.2, *)
+    private func startPollingAndTimer(activity: Activity<BusArrivalAttributes>, tracker: LiveActivityTracker) {
+        // Cancel any existing tasks
+        liveActivityTimerTask?.cancel()
+        liveActivityPollingTask?.cancel()
+        
+        // Timer task: refresh the countdown display every 15 seconds using MainActor Timer
+        liveActivityTimerTask = Task { @MainActor [weak self] in
             let timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
-                Task {
+                Task.detached {
+                    let trackedTime = tracker.currentTrackedTime
                     let freshState = BusArrivalAttributes.ContentState(
-                        arrivalTime: currentTrackedTime,
-                        minutesAway: max(0, Int(currentTrackedTime.timeIntervalSinceNow / 60)),
-                        stopsAway: activity.content.state.stopsAway
+                        arrivalTime: trackedTime,
+                        minutesAway: max(0, Int(trackedTime.timeIntervalSinceNow / 60)),
+                        stopsAway: tracker.latestStopsAway
                     )
                     await activity.update(.init(state: freshState, staleDate: Date().addingTimeInterval(60)))
                 }
             }
             RunLoop.current.add(timer, forMode: .common)
-            // Keep timer alive until this task is cancelled
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             timer.invalidate()
+            _ = self
         }
         
-        while !Task.isCancelled {
-            // Always wait before fetching — initial data is already set by startLiveActivity
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            
-            // Use captured values so we keep polling even if user navigates away in UI
-            let routeID = capturedRouteID ?? selectedRoute?.id
-            let stopID = capturedStopID ?? selectedStopID
-            
-            guard let routeID, let stopID else {
-                break
-            }
-            
-            do {
-                let predictions = try await MBTAService.shared.fetchPredictions(stopId: stopID, routeId: routeID)
+        // Polling task: runs OFF the main actor so it doesn't compete with UI work.
+        // Uses Task.detached to avoid inheriting @MainActor from the calling context,
+        // which caused the Task to be silently cancelled in Release/TestFlight builds.
+        let weakSelf = Weak(self)
+        liveActivityPollingTask = Task.detached {
+            while !Task.isCancelled {
+                // Sleep off the main actor — this is the critical difference vs before
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { break }
                 
-                // Filter by direction to avoid matching wrong-direction trains at shared stops
-                let directionalPredictions: [BusArrival]
-                if let dirID = trackedDirectionID {
-                    directionalPredictions = predictions.filter { $0.directionId == dirID }
-                } else {
-                    directionalPredictions = predictions
-                }
-                
-                // Find the prediction closest to the tracked arrival time (within 5 min tolerance)
-                let validPrediction = directionalPredictions
-                    .filter { $0.minutesAway != nil }
-                    .filter {
-                        let time = $0.arrivalTime ?? $0.departureTime ?? .distantFuture
-                        return abs(time.timeIntervalSince(currentTrackedTime)) < 300 // 5 min tolerance
-                    }
-                    .min(by: { a, b in
-                        let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
-                        let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
-                        return abs(aTime.timeIntervalSince(currentTrackedTime)) < abs(bTime.timeIntervalSince(currentTrackedTime))
-                    })
-                
-                // If exact match fails, fall back to the first upcoming prediction in the right direction
-                let bestPrediction = validPrediction ?? directionalPredictions.first(where: { ($0.minutesAway ?? -1) >= 0 })
-                
-                guard let bestPrediction,
-                      let newArrivalTime = bestPrediction.arrivalTime ?? bestPrediction.departureTime,
-                      let newMinutesAway = bestPrediction.minutesAway else {
-                    // No more arrivals, end activity
-                    timerTask.cancel()
-                    await activity.end(nil, dismissalPolicy: .immediate)
-                    await MainActor.run {
-                        currentActivity = nil
-                        liveActivityDirectionID = nil
-                    }
-                    break
-                }
-                
-                // Update tracked time to follow any slight API shifts
-                currentTrackedTime = newArrivalTime
-                
-                // Update Live Activity with fresh data
-                let updatedState = BusArrivalAttributes.ContentState(
-                    arrivalTime: newArrivalTime,
-                    minutesAway: newMinutesAway,
-                    stopsAway: bestPrediction.stopsAway ?? 0
-                )
-                
-                await activity.update(.init(state: updatedState, staleDate: Date().addingTimeInterval(120)))
-                
-                // Auto-dismiss: if arrival is within 1 minute or has passed, wait 60s then end
-                if newMinutesAway <= 1 || newArrivalTime.timeIntervalSinceNow < 60 {
-                    try? await Task.sleep(nanoseconds: 60_000_000_000)
-                    timerTask.cancel()
-                    await activity.end(nil, dismissalPolicy: .immediate)
-                    await MainActor.run {
-                        currentActivity = nil
-                        liveActivityDirectionID = nil
-                    }
-                    break
-                }
-                
-                // Update local arrivals in the app too (use direction-filtered predictions)
-                await MainActor.run {
-                    let routeName = selectedRoute?.displayName ?? routeID
-                    let stop = selectedStop
+                do {
+                    let predictions = try await MBTAService.shared.fetchPredictions(
+                        stopId: tracker.stopID,
+                        routeId: tracker.routeID
+                    )
                     
-                    arrivals = Array(directionalPredictions.prefix(3)).map { arrival in
-                        BusArrival(
-                            id: arrival.id,
-                            routeId: arrival.routeId,
-                            routeName: routeName,
-                            stopId: arrival.stopId,
-                            stopName: stop?.name ?? "",
-                            arrivalTime: arrival.arrivalTime,
-                            departureTime: arrival.departureTime,
-                            minutesAway: arrival.minutesAway,
-                            stopsAway: arrival.stopsAway,
-                            directionId: arrival.directionId,
-                            status: arrival.status
-                        )
+                    // Filter by direction to avoid matching wrong-direction trains at shared stops
+                    let directionalPredictions: [BusArrival]
+                    if let dirID = tracker.directionID {
+                        directionalPredictions = predictions.filter { $0.directionId == dirID }
+                    } else {
+                        directionalPredictions = predictions
                     }
+                    
+                    // Find the prediction closest to the tracked arrival time (within 5 min tolerance)
+                    let currentTrackedTime = tracker.currentTrackedTime
+                    let validPrediction = directionalPredictions
+                        .filter { $0.minutesAway != nil }
+                        .filter {
+                            let time = $0.arrivalTime ?? $0.departureTime ?? .distantFuture
+                            return abs(time.timeIntervalSince(currentTrackedTime)) < 300
+                        }
+                        .min(by: { a, b in
+                            let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
+                            let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
+                            return abs(aTime.timeIntervalSince(currentTrackedTime)) < abs(bTime.timeIntervalSince(currentTrackedTime))
+                        })
+                    
+                    let bestPrediction = validPrediction ?? directionalPredictions.first(where: { ($0.minutesAway ?? -1) >= 0 })
+                    
+                    guard let bestPrediction,
+                          let newArrivalTime = bestPrediction.arrivalTime ?? bestPrediction.departureTime,
+                          let newMinutesAway = bestPrediction.minutesAway else {
+                        // No more arrivals, end activity
+                        await MainActor.run {
+                            weakSelf.value?.liveActivityTimerTask?.cancel()
+                        }
+                        await activity.end(nil, dismissalPolicy: .immediate)
+                        await MainActor.run {
+                            weakSelf.value?.currentActivity = nil
+                            weakSelf.value?.liveActivityDirectionID = nil
+                            weakSelf.value?.liveActivityTracker = nil
+                        }
+                        break
+                    }
+                    
+                    // Update shared tracker so the timer sees fresh data
+                    tracker.currentTrackedTime = newArrivalTime
+                    tracker.latestStopsAway = bestPrediction.stopsAway ?? 0
+                    
+                    let updatedState = BusArrivalAttributes.ContentState(
+                        arrivalTime: newArrivalTime,
+                        minutesAway: newMinutesAway,
+                        stopsAway: bestPrediction.stopsAway ?? 0
+                    )
+                    await activity.update(.init(state: updatedState, staleDate: Date().addingTimeInterval(120)))
+                    
+                    // Auto-dismiss: if arrival is within 1 minute or has passed
+                    if newMinutesAway <= 1 || newArrivalTime.timeIntervalSinceNow < 60 {
+                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        await MainActor.run {
+                            weakSelf.value?.liveActivityTimerTask?.cancel()
+                        }
+                        await activity.end(nil, dismissalPolicy: .immediate)
+                        await MainActor.run {
+                            weakSelf.value?.currentActivity = nil
+                            weakSelf.value?.liveActivityDirectionID = nil
+                            weakSelf.value?.liveActivityTracker = nil
+                        }
+                        break
+                    }
+                    
+                    // Update local arrivals in the app too
+                    let routeID = tracker.routeID
+                    await MainActor.run {
+                        guard let vm = weakSelf.value else { return }
+                        let routeName = vm.selectedRoute?.displayName ?? routeID
+                        let stop = vm.selectedStop
+                        
+                        vm.arrivals = Array(directionalPredictions.prefix(3)).map { arrival in
+                            BusArrival(
+                                id: arrival.id,
+                                routeId: arrival.routeId,
+                                routeName: routeName,
+                                stopId: arrival.stopId,
+                                stopName: stop?.name ?? "",
+                                arrivalTime: arrival.arrivalTime,
+                                departureTime: arrival.departureTime,
+                                minutesAway: arrival.minutesAway,
+                                stopsAway: arrival.stopsAway,
+                                directionId: arrival.directionId,
+                                status: arrival.status
+                            )
+                        }
+                    }
+                } catch {
+                    // On error, continue trying — don't break the loop
+                    print("Failed to update Live Activity: \(error)")
                 }
-            } catch {
-                // On error, continue trying
-                print("Failed to update Live Activity: \(error)")
             }
         }
-        
-        // Cleanup
-        timerTask.cancel()
+    }
+    
+    /// Type-erased weak reference wrapper for use in Task.detached closures
+    /// (which cannot capture [weak self] directly).
+    private class Weak<T: AnyObject> {
+        weak var value: T?
+        init(_ value: T) { self.value = value }
     }
     #endif
     
     func stopLiveActivity() {
         #if canImport(ActivityKit)
         guard #available(iOS 16.2, *) else { return }
+        
+        // Cancel polling and timer tasks
+        liveActivityPollingTask?.cancel()
+        liveActivityTimerTask?.cancel()
+        liveActivityPollingTask = nil
+        liveActivityTimerTask = nil
+        liveActivityTracker = nil
         
         if let activity = currentActivity as? Activity<BusArrivalAttributes> {
             Task {
@@ -1042,6 +1141,7 @@ final class ArrivalsViewModel: ObservableObject {
                 await MainActor.run {
                     currentActivity = nil
                     liveActivityDirectionID = nil
+                    clearLiveActivitySelection()
                 }
             }
         }
@@ -1056,5 +1156,59 @@ final class ArrivalsViewModel: ObservableObject {
         return direction.destination
             .replacingOccurrences(of: " Station", with: "")
             .replacingOccurrences(of: " station", with: "")
+    }
+    
+    // MARK: - Live Activity Selection Persistence
+    
+    private func saveLiveActivitySelection() {
+        guard let route = selectedRoute,
+              let directionID = selectedDirectionID,
+              let stopID = selectedStopID else { return }
+        
+        let favorite = SavedFavorite(
+            mode: selectedMode,
+            routeID: route.id,
+            routeName: route.displayName,
+            directionID: directionID,
+            directionName: directions.first(where: { $0.id == directionID })?.name ?? "",
+            directionDestination: directions.first(where: { $0.id == directionID })?.destination ?? "",
+            stopID: stopID,
+            stopName: selectedStop?.name ?? ""
+        )
+        
+        if let data = try? JSONEncoder().encode(favorite) {
+            UserDefaults.standard.set(data, forKey: "liveActivitySelection")
+        }
+    }
+    
+    private func clearLiveActivitySelection() {
+        UserDefaults.standard.removeObject(forKey: "liveActivitySelection")
+    }
+    
+    private func restoreLiveActivitySelectionIfNeeded() {
+        #if canImport(ActivityKit)
+        guard #available(iOS 16.2, *) else { return }
+        
+        // Check if there's a running live activity
+        let runningActivities = Activity<BusArrivalAttributes>.activities
+        guard !runningActivities.isEmpty else {
+            clearLiveActivitySelection()
+            return
+        }
+        
+        // Restore the saved selection
+        guard let data = UserDefaults.standard.data(forKey: "liveActivitySelection"),
+              let favorite = try? JSONDecoder().decode(SavedFavorite.self, from: data) else {
+            return
+        }
+        
+        // Reconnect to the running activity
+        currentActivity = runningActivities.first
+        
+        // Restore the selection by loading the favorite
+        Task {
+            await loadFavorite(favorite)
+        }
+        #endif
     }
 }
