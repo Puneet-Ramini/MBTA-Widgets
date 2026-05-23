@@ -1031,7 +1031,8 @@ final class ArrivalsViewModel: ObservableObject {
                             return abs(aTime.timeIntervalSince(currentTrackedTime)) < abs(bTime.timeIntervalSince(currentTrackedTime))
                         })
                     
-                    let bestPrediction = validPrediction ?? directionalPredictions.first(where: { ($0.minutesAway ?? -1) >= 0 })
+                    // Don't fall back to the next bus — if the tracked bus arrived, end the activity
+                    let bestPrediction = validPrediction
                     
                     guard let bestPrediction,
                           let newArrivalTime = bestPrediction.arrivalTime ?? bestPrediction.departureTime,
