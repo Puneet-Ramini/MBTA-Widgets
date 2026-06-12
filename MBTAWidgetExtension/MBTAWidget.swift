@@ -87,8 +87,11 @@ private extension String {
 
 struct MBTAWidgetEntry: TimelineEntry {
     let date: Date
+    let routeID: String?
     let routeName: String
+    let directionID: Int?
     let directionLine: String
+    let stopID: String?
     let stopName: String
     let predictions: [WidgetArrivalDisplay]
     let message: String?
@@ -122,8 +125,11 @@ private struct WidgetArrivalSnapshot {
 
 private struct WidgetContentState {
     let mode: WidgetTransportMode
+    let routeID: String?
     let routeName: String
+    let directionID: Int?
     let directionLine: String
+    let stopID: String?
     let stopName: String
     let arrivals: [WidgetArrivalSnapshot]
     let message: String?
@@ -135,8 +141,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         let now = Date()
         return MBTAWidgetEntry(
             date: now,
+            routeID: "39",
             routeName: "39",
+            directionID: 0,
             directionLine: "To Back Bay Station",
+            stopID: nil,
             stopName: "Huntington Ave @ Perkins St",
             predictions: [
                 WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(6*60), minutesText: "6 min", stopsAwayText: "2 stops away"),
@@ -172,8 +181,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         if let message = state.message {
             return MBTAWidgetEntry(
                 date: Date(),
+                routeID: state.routeID,
                 routeName: state.routeName,
+                directionID: state.directionID,
                 directionLine: state.directionLine,
+                stopID: state.stopID,
                 stopName: state.stopName,
                 predictions: [],
                 message: message
@@ -190,8 +202,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         
         return MBTAWidgetEntry(
             date: Date(),
+            routeID: state.routeID,
             routeName: state.routeName,
+            directionID: state.directionID,
             directionLine: state.directionLine,
+            stopID: state.stopID,
             stopName: state.stopName,
             predictions: predictions,
             message: nil
@@ -228,8 +243,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         guard let selection = StoredWidgetSelection.load() else {
             return WidgetContentState(
                 mode: .bus,
+                routeID: nil,
                 routeName: "--",
+                directionID: nil,
                 directionLine: "Pick a route in the app",
+                stopID: nil,
                 stopName: "",
                 arrivals: [],
                 message: "Open the app and choose a bus, direction, and stop."
@@ -246,8 +264,11 @@ struct MBTAWidgetProvider: TimelineProvider {
 
             return WidgetContentState(
                 mode: selection.mode,
+                routeID: selection.routeID,
                 routeName: selection.routeName,
+                directionID: selection.directionID,
                 directionLine: selection.directionLine,
+                stopID: selection.stopID,
                 stopName: selection.stopName,
                 arrivals: Array(arrivals.prefix(3)),
                 message: arrivals.isEmpty ? "No upcoming buses right now." : nil
@@ -255,8 +276,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         } catch {
             return WidgetContentState(
                 mode: selection.mode,
+                routeID: selection.routeID,
                 routeName: selection.routeName,
+                directionID: selection.directionID,
                 directionLine: selection.directionLine,
+                stopID: selection.stopID,
                 stopName: selection.stopName,
                 arrivals: [],
                 message: "Could not load bus times."
@@ -301,8 +325,11 @@ struct MBTAWidgetProvider: TimelineProvider {
             
             return WidgetContentState(
                 mode: mode,
+                routeID: favorite.routeID,
                 routeName: favorite.routeName,
+                directionID: favorite.directionID,
                 directionLine: directionLine,
+                stopID: favorite.stopID,
                 stopName: favorite.stopName,
                 arrivals: Array(arrivals.prefix(3)),
                 message: arrivals.isEmpty ? "No upcoming arrivals." : nil
@@ -310,8 +337,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         } catch {
             return WidgetContentState(
                 mode: mode,
+                routeID: favorite.routeID,
                 routeName: favorite.routeName,
+                directionID: favorite.directionID,
                 directionLine: directionLine,
+                stopID: favorite.stopID,
                 stopName: favorite.stopName,
                 arrivals: [],
                 message: "Could not load times."
@@ -324,8 +354,11 @@ struct MBTAWidgetProvider: TimelineProvider {
         // The view will calculate minutes dynamically based on current time
         let entry = MBTAWidgetEntry(
             date: startDate,
+            routeID: state.routeID,
             routeName: state.routeName,
+            directionID: state.directionID,
             directionLine: state.directionLine,
+            stopID: state.stopID,
             stopName: state.stopName,
             predictions: state.arrivals.prefix(3).map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
@@ -461,7 +494,28 @@ struct MBTAWidgetEntryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.background, for: .widget)
-        .widgetURL(URL(string: "mbta-widget://open?route=\(entry.routeName)&stop=\(entry.stopName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
+        .widgetURL(Self.widgetDeepLink(entry: entry))
+    }
+    
+    private static func widgetDeepLink(entry: MBTAWidgetEntry) -> URL {
+        var components = URLComponents()
+        components.scheme = "mbta-widget"
+        components.host = "open"
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "route", value: entry.routeName)
+        ]
+        if let routeID = entry.routeID {
+            items.append(URLQueryItem(name: "routeID", value: routeID))
+        }
+        if let directionID = entry.directionID {
+            items.append(URLQueryItem(name: "directionID", value: String(directionID)))
+        }
+        if let stopID = entry.stopID {
+            items.append(URLQueryItem(name: "stopID", value: stopID))
+        }
+        items.append(URLQueryItem(name: "stop", value: entry.stopName))
+        components.queryItems = items
+        return components.url!
     }
 }
 
@@ -488,8 +542,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         if favoriteIndex == 0 {
             return MBTAWidgetEntry(
                 date: now,
+                routeID: "39",
                 routeName: "39",
+                directionID: 0,
                 directionLine: "To Back Bay Station",
+                stopID: nil,
                 stopName: "",
                 predictions: [
                     WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(2*60), minutesText: "2 min", stopsAwayText: ""),
@@ -500,8 +557,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         } else {
             return MBTAWidgetEntry(
                 date: now,
+                routeID: "CT2",
                 routeName: "CT2",
+                directionID: 0,
                 directionLine: "To Sullivan Square",
+                stopID: nil,
                 stopName: "",
                 predictions: [
                     WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: ""),
@@ -533,8 +593,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         if let message = state.message {
             return MBTAWidgetEntry(
                 date: Date(),
+                routeID: state.routeID,
                 routeName: state.routeName,
+                directionID: state.directionID,
                 directionLine: state.directionLine,
+                stopID: state.stopID,
                 stopName: "",
                 predictions: [],
                 message: message
@@ -551,8 +614,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         
         return MBTAWidgetEntry(
             date: Date(),
+            routeID: state.routeID,
             routeName: state.routeName,
+            directionID: state.directionID,
             directionLine: state.directionLine,
+            stopID: state.stopID,
             stopName: "",
             predictions: Array(predictions),
             message: nil
@@ -597,8 +663,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         guard let favorite = loadFavorite(at: favoriteIndex) else {
             return WidgetContentState(
                 mode: .bus,
+                routeID: nil,
                 routeName: "--",
+                directionID: nil,
                 directionLine: "Set Favorite \(favoriteIndex + 1)",
+                stopID: nil,
                 stopName: "",
                 arrivals: [],
                 message: "Open the app to set this favorite."
@@ -637,8 +706,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
             
             return WidgetContentState(
                 mode: mode,
+                routeID: favorite.routeID,
                 routeName: favorite.routeName,
+                directionID: favorite.directionID,
                 directionLine: directionLine,
+                stopID: favorite.stopID,
                 stopName: "",
                 arrivals: Array(arrivals.prefix(2)),
                 message: arrivals.isEmpty ? "No upcoming arrivals." : nil
@@ -646,8 +718,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         } catch {
             return WidgetContentState(
                 mode: mode,
+                routeID: favorite.routeID,
                 routeName: favorite.routeName,
+                directionID: favorite.directionID,
                 directionLine: directionLine,
+                stopID: favorite.stopID,
                 stopName: "",
                 arrivals: [],
                 message: "Could not load times."
@@ -672,8 +747,11 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         // Single entry with arrival dates stored for dynamic calculation
         let entry = MBTAWidgetEntry(
             date: startDate,
+            routeID: state.routeID,
             routeName: state.routeName,
+            directionID: state.directionID,
             directionLine: state.directionLine,
+            stopID: state.stopID,
             stopName: "",
             predictions: state.arrivals.prefix(2).map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
@@ -774,7 +852,28 @@ struct SmallFavoriteWidgetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.background, for: .widget)
-        .widgetURL(URL(string: "mbta-widget://open?route=\(entry.routeName)&stop=\(entry.stopName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
+        .widgetURL(Self.widgetDeepLink(entry: entry))
+    }
+    
+    private static func widgetDeepLink(entry: MBTAWidgetEntry) -> URL {
+        var components = URLComponents()
+        components.scheme = "mbta-widget"
+        components.host = "open"
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "route", value: entry.routeName)
+        ]
+        if let routeID = entry.routeID {
+            items.append(URLQueryItem(name: "routeID", value: routeID))
+        }
+        if let directionID = entry.directionID {
+            items.append(URLQueryItem(name: "directionID", value: String(directionID)))
+        }
+        if let stopID = entry.stopID {
+            items.append(URLQueryItem(name: "stopID", value: stopID))
+        }
+        items.append(URLQueryItem(name: "stop", value: entry.stopName))
+        components.queryItems = items
+        return components.url!
     }
 }
 
@@ -873,7 +972,7 @@ struct BusArrivalLiveActivity: Widget {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .widgetURL(Self.liveActivityDeepLink(routeName: context.attributes.routeName, stopName: context.attributes.stopName))
+            .widgetURL(Self.liveActivityDeepLink(attributes: context.attributes))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -936,18 +1035,24 @@ struct BusArrivalLiveActivity: Widget {
                 Text(context.state.minutesText)
                     .font(.system(size: 11, weight: .bold))
             }
-            .widgetURL(Self.liveActivityDeepLink(routeName: context.attributes.routeName, stopName: context.attributes.stopName))
+            .widgetURL(Self.liveActivityDeepLink(attributes: context.attributes))
         }
     }
     
-    private static func liveActivityDeepLink(routeName: String, stopName: String) -> URL {
+    private static func liveActivityDeepLink(attributes: BusArrivalAttributes) -> URL {
         var components = URLComponents()
         components.scheme = "mbta-widget"
         components.host = "open"
-        components.queryItems = [
-            URLQueryItem(name: "route", value: routeName),
-            URLQueryItem(name: "stop", value: stopName)
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "route", value: attributes.routeName),
+            URLQueryItem(name: "routeID", value: attributes.routeID),
+            URLQueryItem(name: "stopID", value: attributes.stopID),
+            URLQueryItem(name: "stop", value: attributes.stopName)
         ]
+        if let directionID = attributes.directionID {
+            items.append(URLQueryItem(name: "directionID", value: String(directionID)))
+        }
+        components.queryItems = items
         return components.url!
     }
 }
@@ -960,8 +1065,11 @@ struct BusArrivalLiveActivity: Widget {
     let now = Date()
     MBTAWidgetEntry(
         date: now,
+        routeID: "39",
         routeName: "39",
+        directionID: 0,
         directionLine: "To Back Bay Station",
+        stopID: nil,
         stopName: "Huntington Ave @ Perkins St",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(6*60), minutesText: "6 min", stopsAwayText: "2 stops away"),
@@ -973,8 +1081,11 @@ struct BusArrivalLiveActivity: Widget {
     
     MBTAWidgetEntry(
         date: now.addingTimeInterval(60),
+        routeID: "39",
         routeName: "39",
+        directionID: 0,
         directionLine: "To Back Bay Station",
+        stopID: nil,
         stopName: "Huntington Ave @ Perkins St",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: "2 stops away"),
@@ -989,6 +1100,7 @@ private struct StoredWidgetSelection {
     let mode: WidgetTransportMode
     let routeID: String
     let routeName: String
+    let directionID: Int?
     let directionLine: String
     let stopID: String
     let stopName: String
@@ -1010,6 +1122,7 @@ private struct StoredWidgetSelection {
             return nil
         }
 
+        let directionID = defaults.object(forKey: "widget.directionID") as? Int
         let directionName = defaults.string(forKey: "widget.directionName") ?? ""
         let destination = defaults.string(forKey: "widget.directionDestination") ?? ""
         let directionLine: String
@@ -1026,6 +1139,7 @@ private struct StoredWidgetSelection {
             mode: mode,
             routeID: routeID,
             routeName: routeName,
+            directionID: directionID,
             directionLine: directionLine,
             stopID: stopID,
             stopName: stopName
@@ -1061,6 +1175,7 @@ private struct StoredWidgetSelection {
             mode: mode,
             routeID: favorite.routeID,
             routeName: favorite.routeName,
+            directionID: favorite.directionID,
             directionLine: directionLine,
             stopID: favorite.stopID,
             stopName: favorite.stopName
@@ -1460,8 +1575,11 @@ private enum WidgetAPIUsageStore {
     let now = Date()
     MBTAWidgetEntry(
         date: now,
+        routeID: "39",
         routeName: "39",
+        directionID: 0,
         directionLine: "To Back Bay Station",
+        stopID: nil,
         stopName: "",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(2*60), minutesText: "2 min", stopsAwayText: ""),
@@ -1472,8 +1590,11 @@ private enum WidgetAPIUsageStore {
     
     MBTAWidgetEntry(
         date: now.addingTimeInterval(60),
+        routeID: "39",
         routeName: "39",
+        directionID: 0,
         directionLine: "To Back Bay Station",
+        stopID: nil,
         stopName: "",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(1*60), minutesText: "1 min", stopsAwayText: ""),
@@ -1488,8 +1609,11 @@ private enum WidgetAPIUsageStore {
     let now = Date()
     MBTAWidgetEntry(
         date: now,
+        routeID: "CT2",
         routeName: "CT2",
+        directionID: 0,
         directionLine: "To Sullivan Square",
+        stopID: nil,
         stopName: "",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: ""),

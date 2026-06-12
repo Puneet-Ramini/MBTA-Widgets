@@ -28,12 +28,16 @@ public struct BusArrivalAttributes: ActivityAttributes {
     public let routeID: String
     public let routeName: String
     public let destination: String
+    public let directionID: Int?
+    public let stopID: String
     public let stopName: String
     
-    public init(routeID: String, routeName: String, destination: String, stopName: String) {
+    public init(routeID: String, routeName: String, destination: String, directionID: Int? = nil, stopID: String = "", stopName: String) {
         self.routeID = routeID
         self.routeName = routeName
         self.destination = destination
+        self.directionID = directionID
+        self.stopID = stopID
         self.stopName = stopName
     }
 }

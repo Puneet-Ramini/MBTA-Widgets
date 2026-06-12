@@ -35,12 +35,16 @@ public struct BusArrivalAttributes: ActivityAttributes {
     public let routeID: String
     public let routeName: String
     public let destination: String
+    public let directionID: Int?
+    public let stopID: String
     public let stopName: String
     
-    public init(routeID: String, routeName: String, destination: String, stopName: String) {
+    public init(routeID: String, routeName: String, destination: String, directionID: Int? = nil, stopID: String = "", stopName: String) {
         self.routeID = routeID
         self.routeName = routeName
         self.destination = destination
+        self.directionID = directionID
+        self.stopID = stopID
         self.stopName = stopName
     }
 }
@@ -225,21 +229,106 @@ final class ArrivalsViewModel: ObservableObject {
             return
         }
         
+        let routeID = queryItems.first(where: { $0.name == "routeID" })?.value
+        let directionIDString = queryItems.first(where: { $0.name == "directionID" })?.value
+        let directionID = directionIDString.flatMap { Int($0) }
+        let stopID = queryItems.first(where: { $0.name == "stopID" })?.value
         let routeName = queryItems.first(where: { $0.name == "route" })?.value
-        let stopName = queryItems.first(where: { $0.name == "stop" })?.value
         
-        // Try to find matching favorite
-        if let routeName = routeName,
-           let favorite = quickFavorites.compactMap({ $0 }).first(where: { $0.routeName == routeName }) {
-            await loadFavorite(favorite)
-            await loadArrivals()
+        // Best match: find favorite by routeID + directionID + stopID
+        if let routeID = routeID {
+            let match = quickFavorites.compactMap({ $0 }).first(where: { fav in
+                fav.routeID == routeID
+                    && (directionID == nil || fav.directionID == directionID)
+                    && (stopID == nil || fav.stopID == stopID)
+            })
+            if let match {
+                await loadFavorite(match)
+                await loadArrivals()
+                return
+            }
+        }
+        
+        // Fallback: match by routeName + directionID (legacy URLs without routeID)
+        if let routeName = routeName {
+            let match = quickFavorites.compactMap({ $0 }).first(where: { fav in
+                fav.routeName == routeName
+                    && (directionID == nil || fav.directionID == directionID)
+                    && (stopID == nil || fav.stopID == stopID)
+            })
+            if let match {
+                await loadFavorite(match)
+                await loadArrivals()
+                return
+            }
+        }
+        
+        // No favorite match — load the route directly from URL parameters
+        // This handles non-favorited routes opened from the Dynamic Island / widget
+        if let routeID = routeID, let directionID = directionID, let stopID = stopID {
+            await loadRouteDirectly(routeID: routeID, directionID: directionID, stopID: stopID)
             return
         }
         
-        // Fallback to old behavior if no match
+        // Final fallback to old behavior
         await loadFromWidgetLegacy()
     }
     
+    /// Loads a route directly from URL parameters (routeID, directionID, stopID)
+    /// without requiring a saved favorite. Used when tapping a Live Activity / widget
+    /// for a non-favorited route.
+    private func loadRouteDirectly(routeID: String, directionID: Int, stopID: String) async {
+        errorMessage = nil
+        arrivals = []
+        stops = []
+        selectedStopID = nil
+        directions = []
+        selectedDirectionID = nil
+        selectedRoute = nil
+
+        isLoadingRoute = true
+
+        do {
+            let route = try await MBTAService.shared.fetchRoute(matching: routeID, mode: .bus)
+            selectedMode = .bus
+            selectedRoute = route
+            directions = route.directionOptions
+            routeInput = route.displayName
+            selectedPresetLineQuery = route.id
+            selectedDirectionID = directionID
+            saveWidgetSelection()
+        } catch {
+            // Try other modes if bus didn't match
+            for mode in [TransportMode.commuterRail, .subway] {
+                if let route = try? await MBTAService.shared.fetchRoute(matching: routeID, mode: mode) {
+                    selectedMode = mode
+                    selectedRoute = route
+                    directions = route.directionOptions
+                    routeInput = route.displayName
+                    selectedPresetLineQuery = route.id
+                    selectedDirectionID = directionID
+                    saveWidgetSelection()
+                    break
+                }
+            }
+        }
+
+        isLoadingRoute = false
+
+        guard selectedRoute != nil else {
+            errorMessage = "Could not load that route."
+            return
+        }
+
+        await loadStops()
+
+        if stops.contains(where: { $0.id == stopID }) {
+            selectedStopID = stopID
+            saveWidgetSelection()
+            await loadArrivals()
+        }
+    }
+
     private func loadFromWidgetLegacy() async {
         // Load the favorite that's currently showing in the widget
         guard let favorite = loadActiveWidgetFavorite() else {
@@ -817,6 +906,8 @@ final class ArrivalsViewModel: ObservableObject {
             routeID: selectedRoute?.id ?? validArrival.routeId,
             routeName: validArrival.routeName,
             destination: destination.isEmpty ? "Arriving" : destination,
+            directionID: selectedDirectionID,
+            stopID: selectedStopID ?? validArrival.stopId,
             stopName: validArrival.stopName
         )
         

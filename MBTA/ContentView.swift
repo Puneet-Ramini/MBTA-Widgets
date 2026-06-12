@@ -95,11 +95,6 @@ struct ContentView: View {
                             .blur(radius: isPickingPrediction ? 6 : 0)
                             .allowsHitTesting(!isPickingPrediction)
                         
-                        supportButton
-                            .padding(.bottom, 8)
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        
                         aboutButton
                             .padding(.bottom, 20)
                             .blur(radius: isPickingPrediction ? 6 : 0)
@@ -559,6 +554,22 @@ struct ContentView: View {
                     
                     Button {
                         haptic()
+                        isShowingFavoritePicker = true
+                    } label: {
+                        Image(systemName: isCurrentSelectionAlreadyFavorited ? "star.fill" : "star")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.orange)
+                            .padding(8)
+                            .background {
+                                Circle()
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+                            }
+                    }
+                    .disabled(isCurrentSelectionAlreadyFavorited)
+                    
+                    Button {
+                        haptic()
                         Task {
                             await viewModel.loadArrivals()
                         }
@@ -853,32 +864,6 @@ struct ContentView: View {
         }
     }
     
-    private var supportButton: some View {
-        Button {
-            haptic()
-            if let url = URL(string: "https://www.buymeacoffee.com/puneetramini") {
-                UIApplication.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 14) {
-                Text("🚇")
-                    .font(.system(size: 18))
-
-                Text("Buy me a subway ride")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.primary)
-
-                Spacer()
-
-                Image(systemName: "arrow.up.forward")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-            .padding(14)
-            .liquidGlassCard()
-        }
-    }
-    
     private var aboutButton: some View {
         Button {
             haptic()
@@ -920,6 +905,20 @@ struct ContentView: View {
         return "\(displayRoute) \(directionSymbol(for: favorite.directionID))"
     }
 
+    private var isCurrentSelectionAlreadyFavorited: Bool {
+        guard let routeID = viewModel.selectedRoute?.id,
+              let directionID = viewModel.selectedDirectionID,
+              let stopID = viewModel.selectedStopID else {
+            return false
+        }
+        return viewModel.quickFavorites.contains { favorite in
+            guard let favorite else { return false }
+            return favorite.routeID == routeID &&
+                   favorite.directionID == directionID &&
+                   favorite.stopID == stopID
+        }
+    }
+    
     private func isQuickRouteSelected(_ favorite: SavedFavorite?) -> Bool {
         guard let favorite,
               favorite.routeID == viewModel.selectedRoute?.id,
@@ -1732,37 +1731,59 @@ private struct AboutView: View {
                 .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    // What the app does button
-                    VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Instructions
+                    NavigationLink(destination: InstructionsView()) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "book.fill")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.orange)
+                                .frame(width: 24, height: 24)
+                            
+                            Text("Instructions")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.primary)
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(16)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                        }
+                    }
+                    
+                    // What the app does
+                    VStack(alignment: .leading, spacing: 0) {
                         Button {
                             haptic()
                             withAnimation(.spring(response: 0.3)) {
                                 isShowingWhatItDoes.toggle()
                             }
                         } label: {
-                            HStack(spacing: 14) {
+                            HStack(spacing: 12) {
                                 Image(systemName: "list.bullet.clipboard")
-                                    .font(.system(size: 18, weight: .medium))
+                                    .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.blue)
+                                    .frame(width: 24, height: 24)
                                 
                                 Text("What the app does")
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.primary)
                                 
                                 Spacer()
                                 
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundColor(.secondary)
                                     .rotationEffect(.degrees(isShowingWhatItDoes ? 90 : 0))
                             }
-                            .padding(18)
-                            .background {
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.secondarySystemGroupedBackground))
-                                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                            }
+                            .padding(16)
                         }
                         .buttonStyle(.plain)
                         
@@ -1777,64 +1798,62 @@ private struct AboutView: View {
                             }
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
+                            .padding(.horizontal, 16)
                             
                             Text("Why it exists:")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .padding(.top, 8)
+                                .padding(.horizontal, 16)
                             
                             Text("This app is designed for commuters who want fast, reliable information with zero friction. No clutter, no extra steps — just the data you need.")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
+                                .padding(.horizontal, 16)
                             
                             Text("Data source:")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .padding(.top, 8)
+                                .padding(.horizontal, 16)
                             
                             Text("All transit data is provided by the official MBTA public API.")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 16)
                         }
                     }
-                    .padding(isShowingWhatItDoes ? 18 : 0)
                     .background {
-                        if isShowingWhatItDoes {
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(.secondarySystemGroupedBackground))
-                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                        }
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                            .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                     
-                    // About this app button
-                    VStack(alignment: .leading, spacing: 12) {
+                    // About this app
+                    VStack(alignment: .leading, spacing: 0) {
                         Button {
                             haptic()
                             withAnimation(.spring(response: 0.3)) {
                                 isShowingAboutApp.toggle()
                             }
                         } label: {
-                            HStack(spacing: 14) {
+                            HStack(spacing: 12) {
                                 Image(systemName: "app.fill")
-                                    .font(.system(size: 18, weight: .medium))
+                                    .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.green)
+                                    .frame(width: 24, height: 24)
                                 
                                 Text("About this app")
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.primary)
                                 
                                 Spacer()
                                 
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundColor(.secondary)
                                     .rotationEffect(.degrees(isShowingAboutApp ? 90 : 0))
                             }
-                            .padding(18)
-                            .background {
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.secondarySystemGroupedBackground))
-                                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                            }
+                            .padding(16)
                         }
                         .buttonStyle(.plain)
                         
@@ -1843,40 +1862,40 @@ private struct AboutView: View {
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 16)
                         }
                     }
-                    .padding(isShowingAboutApp ? 18 : 0)
                     .background {
-                        if isShowingAboutApp {
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(.secondarySystemGroupedBackground))
-                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                        }
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                            .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                     
+                    // Share Feedback
                     Button {
                         haptic()
                         if let url = URL(string: "https://docs.google.com/forms/d/e/1FAIpQLSetMU7XgiDaOgMJXtlMQVteH796sDNcNeviN-cikIC2CuRFAA/viewform?usp=header") {
                             UIApplication.shared.open(url)
                         }
                     } label: {
-                        HStack(spacing: 14) {
+                        HStack(spacing: 12) {
                             Image(systemName: "envelope.fill")
-                                .font(.system(size: 18, weight: .medium))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.blue)
+                                .frame(width: 24, height: 24)
 
                             Text("Share Feedback")
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.primary)
 
                             Spacer()
 
                             Image(systemName: "arrow.up.forward")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.secondary)
                         }
-                        .padding(18)
+                        .padding(16)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(Color(.secondarySystemGroupedBackground))
@@ -1884,23 +1903,30 @@ private struct AboutView: View {
                         }
                     }
                     
-                    NavigationLink(destination: PrivacyPolicyView()) {
-                        HStack(spacing: 14) {
+                    // Privacy Policy
+                    Button {
+                        haptic()
+                        if let url = URL(string: "https://mbta-widgets.web.app") {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
                             Image(systemName: "hand.raised.fill")
-                                .font(.system(size: 18, weight: .medium))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.purple)
+                                .frame(width: 24, height: 24)
 
                             Text("Privacy Policy")
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.primary)
 
                             Spacer()
 
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "arrow.up.forward")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.secondary)
                         }
-                        .padding(18)
+                        .padding(16)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(Color(.secondarySystemGroupedBackground))
@@ -1908,30 +1934,32 @@ private struct AboutView: View {
                         }
                     }
                     
+                    // Buy me a subway ride
                     Button {
                         haptic()
                         if let url = URL(string: "https://www.buymeacoffee.com/puneetramini") {
                             UIApplication.shared.open(url)
                         }
                     } label: {
-                        HStack(spacing: 14) {
-                            Text("🚇")
-                                .font(.system(size: 18))
+                        HStack(spacing: 12) {
+                            Text("\u{1F687}")
+                                .font(.system(size: 16))
+                                .frame(width: 24, height: 24)
 
                             Text("Buy me a subway ride")
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.primary)
 
                             Spacer()
 
                             Image(systemName: "arrow.up.forward")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.secondary)
                         }
-                        .padding(18)
+                        .padding(16)
                         .background {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(.secondarySystemGroupedBackground))
+                                .fill(Color(red: 255/255, green: 221/255, blue: 0/255).opacity(0.25))
                                 .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                         }
                     }
@@ -1945,110 +1973,235 @@ private struct AboutView: View {
     }
 }
 
-private struct PrivacyPolicyView: View {
+// MARK: - Instructions View
+
+private struct InstructionsView: View {
+    private struct InstructionStep: Identifiable {
+        let id: Int
+        let title: String
+        let subtitle: String
+        let imageName: String
+        let icon: String
+        let color: Color
+    }
+    
+    private let steps: [InstructionStep] = [
+        InstructionStep(
+            id: 1,
+            title: "Save to Quick Access",
+            subtitle: "Tap the star on any route or use the + button to save favorites for one-tap access.",
+            imageName: "InstructionQuickAccess",
+            icon: "star.fill",
+            color: .orange
+        ),
+        InstructionStep(
+            id: 2,
+            title: "Add a Widget",
+            subtitle: "Put MBTA arrivals on your Home Screen in a few quick steps.",
+            imageName: "InstructionAddWidget",
+            icon: "plus.rectangle.on.rectangle",
+            color: .blue
+        ),
+        InstructionStep(
+            id: 3,
+            title: "Customize Your Widget",
+            subtitle: "Personalize your widgets to fit your schedule and favorite routes.",
+            imageName: "InstructionCustomizeWidget",
+            icon: "slider.horizontal.3",
+            color: .blue
+        ),
+        InstructionStep(
+            id: 4,
+            title: "Smart Scheduling",
+            subtitle: "Automatically switch routes based on time of day.",
+            imageName: "InstructionSmartScheduling",
+            icon: "clock.arrow.2.circlepath",
+            color: .blue
+        ),
+        InstructionStep(
+            id: 5,
+            title: "Dynamic Island",
+            subtitle: "See live arrival countdowns without opening the app.",
+            imageName: "InstructionDynamicIsland",
+            icon: "iphone",
+            color: .blue
+        )
+    ]
+    
+    @State private var zoomedStep: InstructionStep? = nil
+    @Namespace private var zoomNamespace
+    
     var body: some View {
         ZStack {
             Color(.systemGroupedBackground)
                 .ignoresSafeArea()
             
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Effective Date: 04/23/2026")
-                        .font(.system(size: 13))
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Learn how to get the most out of MBTA Widgets.")
+                        .font(.system(size: 14))
                         .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
                     
-                    Text("MBTA Widgets respects your privacy. This Privacy Policy explains how we collect, use, and protect information when you use the app.")
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                    
-                    privacySection(
-                        title: "1. Information We Collect",
-                        content: "We collect limited, non-personal, anonymous data to improve app performance, reliability, and real-time features.\n\nThis includes:\n• A randomly generated anonymous device identifier (UUID)\n• MBTA usage data (routes, stops, directions viewed)\n• API performance data (response times, success/failure rates)\n• App usage timestamps\n• Widget refresh activity\n\nFor Live Activities (Dynamic Island / Lock Screen updates), we temporarily collect:\n• APNs push token (used only to deliver Live Activity updates)\n• Route ID and route name\n• Stop ID and stop name\n• Direction ID\n• Destination name\n• Tracked arrival time (timestamp)\n• Server timestamp of activity creation"
-                    )
-                    
-                    privacySection(
-                        title: "2. Information We Do NOT Collect",
-                        content: "We do not collect:\n• Name, email, or phone number\n• Location data\n• IP address\n• Payment information\n• Contacts, photos, or files\n• Any data that directly identifies you"
-                    )
-                    
-                    privacySection(
-                        title: "3. How We Use Information",
-                        content: "We use collected data to:\n• Deliver real-time transit updates via widgets and Live Activities\n• Monitor MBTA API performance and reliability\n• Identify and fix bugs\n• Improve app speed and stability\n• Understand general usage patterns (e.g., commonly used routes)"
-                    )
-                    
-                    privacySection(
-                        title: "4. Data Storage and Processing",
-                        content: "• Anonymous usage data is stored securely using Supabase\n• Live Activity data (including push tokens and transit selections) is stored temporarily using Firebase\n• Push tokens are used only for Live Activity updates and are deactivated when no longer valid or when the activity ends\n• Data is not sold, rented, or shared for marketing purposes\n• Data is processed solely to operate and improve the app"
-                    )
-                    
-                    privacySection(
-                        title: "5. Live Activity Processing",
-                        content: "To provide real-time updates:\n• A secure server function periodically fetches transit predictions from the MBTA API\n• Updates are sent to your device via Apple Push Notification service (APNs)\n• This process uses temporary identifiers and does not track user identity"
-                    )
-                    
-                    privacySection(
-                        title: "6. Legal Basis for Processing",
-                        content: "We process anonymous usage data based on our legitimate interest in improving app functionality, performance, and user experience."
-                    )
-                    
-                    privacySection(
-                        title: "7. User Rights",
-                        content: "• No account is required to use the app\n• Data collection is anonymous\n• You can stop all data collection by uninstalling the app\n• Because data is anonymous, it cannot be linked back to an individual user"
-                    )
-                    
-                    privacySection(
-                        title: "8. Data Retention",
-                        content: "• Anonymous usage data is retained for analytics and performance monitoring\n• Live Activity data (including push tokens) is temporary and removed or deactivated after the activity ends\n• No personally identifiable data is stored"
-                    )
-                    
-                    privacySection(
-                        title: "9. Security",
-                        content: "We use industry-standard security measures to protect stored data from unauthorized access, misuse, or disclosure."
-                    )
-                    
-                    privacySection(
-                        title: "10. Third-Party Services",
-                        content: "We use the following external services:\n\n• MBTA API\nProvides real-time transit data including arrival predictions, routes, and stops\n\n• Firebase\nUsed for temporary storage and processing of Live Activity updates\n\n• Supabase\nUsed for anonymous analytics and performance monitoring\n\n• Google Forms\nUsed for optional user feedback submission\n\n• Buy Me a Coffee\nUsed for optional user support and donations"
-                    )
-                    
-                    privacySection(
-                        title: "11. Children's Privacy",
-                        content: "This app is not directed to children under the age of 13. We do not knowingly collect any personal data from children."
-                    )
-                    
-                    privacySection(
-                        title: "12. Changes to This Policy",
-                        content: "We may update this Privacy Policy from time to time. Updates will be reflected by revising the effective date."
-                    )
-                    
-                    privacySection(
-                        title: "13. Contact",
-                        content: "If you have any questions about this Privacy Policy, contact:\nRamini.p@northeastern.edu"
-                    )
+                    ForEach(steps) { step in
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Step header
+                            HStack(spacing: 10) {
+                                Text("\(step.id)")
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .frame(width: 26, height: 26)
+                                    .background(step.color)
+                                    .clipShape(Circle())
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(step.title)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                    
+                                    Text(step.subtitle)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(16)
+                            
+                            // Instruction image
+                            Button {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    zoomedStep = step
+                                }
+                            } label: {
+                                Image(step.imageName)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .padding(.horizontal, 12)
+                                    .padding(.bottom, 14)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .background {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                        }
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 20)
             }
+            
+            // Fullscreen zoom overlay
+            if let step = zoomedStep {
+                ZoomOverlay(imageName: step.imageName) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        zoomedStep = nil
+                    }
+                }
+                .transition(.opacity)
+            }
         }
-        .navigationTitle("Privacy Policy")
+        .navigationTitle("Instructions")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+private struct ZoomOverlay: View {
+    let imageName: String
+    let onDismiss: () -> Void
     
-    private func privacySection(title: String, content: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 16, weight: .bold))
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
             
-            Text(content)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.secondarySystemGroupedBackground))
-                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(20)
+                    }
+                }
+                
+                Spacer()
+                
+                Image(imageName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                scale = lastScale * value.magnification
+                            }
+                            .onEnded { value in
+                                lastScale = scale
+                                if scale < 1.0 {
+                                    withAnimation(.spring(response: 0.3)) {
+                                        scale = 1.0
+                                        lastScale = 1.0
+                                        offset = .zero
+                                        lastOffset = .zero
+                                    }
+                                }
+                            }
+                            .simultaneously(with:
+                                DragGesture()
+                                    .onChanged { value in
+                                        offset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { value in
+                                        lastOffset = offset
+                                        if scale <= 1.0 {
+                                            withAnimation(.spring(response: 0.3)) {
+                                                offset = .zero
+                                                lastOffset = .zero
+                                            }
+                                        }
+                                    }
+                            )
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.3)) {
+                            if scale > 1.0 {
+                                scale = 1.0
+                                lastScale = 1.0
+                                offset = .zero
+                                lastOffset = .zero
+                            } else {
+                                scale = 2.5
+                                lastScale = 2.5
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                
+                Spacer()
+                
+                Text("Pinch to zoom \u{2022} Double-tap to toggle \u{2022} Tap X to close")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.bottom, 20)
+            }
         }
     }
 }

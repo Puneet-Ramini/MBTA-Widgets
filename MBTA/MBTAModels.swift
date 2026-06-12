@@ -71,11 +71,18 @@ enum TransportMode: String, CaseIterable, Codable, Identifiable {
             ]
         case .commuterRail:
             return [
-                PresetLine(title: "Framingham/Worcester", query: "Framingham/Worcester", colorName: "purple"),
-                PresetLine(title: "Providence/Stoughton", query: "Providence/Stoughton", colorName: "purple"),
+                PresetLine(title: "Fairmount", query: "Fairmount", colorName: "purple"),
+                PresetLine(title: "Fall River/New Bedford", query: "Fall River/New Bedford", colorName: "purple"),
                 PresetLine(title: "Fitchburg", query: "Fitchburg", colorName: "purple"),
+                PresetLine(title: "Framingham/Worcester", query: "Framingham/Worcester", colorName: "purple"),
+                PresetLine(title: "Franklin/Foxboro", query: "Franklin/Foxboro", colorName: "purple"),
+                PresetLine(title: "Greenbush", query: "Greenbush", colorName: "purple"),
+                PresetLine(title: "Haverhill", query: "Haverhill", colorName: "purple"),
+                PresetLine(title: "Kingston", query: "Kingston", colorName: "purple"),
                 PresetLine(title: "Lowell", query: "Lowell", colorName: "purple"),
-                PresetLine(title: "Franklin/Foxboro", query: "Franklin/Foxboro", colorName: "purple")
+                PresetLine(title: "Needham", query: "Needham", colorName: "purple"),
+                PresetLine(title: "Newburyport/Rockport", query: "Newburyport/Rockport", colorName: "purple"),
+                PresetLine(title: "Providence/Stoughton", query: "Providence/Stoughton", colorName: "purple")
             ]
         }
     }
