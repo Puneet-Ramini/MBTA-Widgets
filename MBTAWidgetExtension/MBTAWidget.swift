@@ -1,8 +1,23 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
+
+// MARK: - Interactive Refresh Intent
+
+struct RefreshWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh MBTA Widget"
+    static var description = IntentDescription("Fetches the latest arrival predictions.")
+    
+    func perform() async throws -> some IntentResult {
+        // The timeline reload happens automatically when perform() returns.
+        // By simply returning here, WidgetKit will call getTimeline() again,
+        // which already fetches fresh data from the MBTA API.
+        return .result()
+    }
+}
 
 private enum WidgetTransportMode: String {
     case bus = "Bus"
@@ -259,6 +274,9 @@ struct MBTAWidgetProvider: TimelineProvider {
                 mode: selection.mode,
                 routeID: selection.routeID,
                 stopID: selection.stopID,
+                routeName: selection.routeName,
+                directionName: selection.directionLine,
+                stopName: selection.stopName,
                 source: "medium_widget"
             )
 
@@ -320,6 +338,9 @@ struct MBTAWidgetProvider: TimelineProvider {
                 mode: mode,
                 routeID: favorite.routeID,
                 stopID: favorite.stopID,
+                routeName: favorite.routeName,
+                directionName: directionLine,
+                stopName: favorite.stopName,
                 source: "medium_widget"
             )
             
@@ -394,7 +415,8 @@ struct MBTAWidgetEntryView: View {
     @Environment(\.widgetRenderingMode) var renderingMode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
+            // Header row: route badge + direction/stop + refresh button
             HStack(alignment: .top) {
                 Text(entry.routeName.displayRouteName)
                     .font(.headline)
@@ -421,14 +443,31 @@ struct MBTAWidgetEntryView: View {
                 
                 Spacer(minLength: 0)
                 
-                // Last updated timestamp
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text("Updated")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.secondary)
-                    Text(entry.date, style: .time)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
+                // Refresh button
+                if #available(iOS 17.0, *) {
+                    Button(intent: RefreshWidgetIntent()) {
+                        VStack(spacing: 3) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                .clipShape(Circle())
+                            Text(entry.date, style: .time)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Updated")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text(entry.date, style: .time)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
@@ -439,12 +478,12 @@ struct MBTAWidgetEntryView: View {
                     .foregroundColor(.secondary)
                 Spacer()
             } else {
-                Spacer(minLength: 4)
+                Spacer(minLength: 6)
                 
+                // Arrival predictions
                 HStack(spacing: 8) {
                     ForEach(Array(entry.predictions.enumerated()), id: \.offset) { index, prediction in
                         VStack(spacing: 4) {
-                            // Use dynamic time calculation based on current date
                             Text(prediction.formattedMinutes(from: entry.date))
                                 .font(.subheadline)
                                 .fontWeight(.bold)
@@ -527,7 +566,7 @@ struct MBTAWidget: Widget {
             MBTAWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("MBTA Arrivals")
-        .description("Shows the next 3 buses for your selected stop.")
+        .description("Next 3 arrivals for your stop. Customize in app under Widget Assignments.")
         .supportedFamilies([.systemMedium])
     }
 }
@@ -701,6 +740,9 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 mode: mode,
                 routeID: favorite.routeID,
                 stopID: favorite.stopID,
+                routeName: favorite.routeName,
+                directionName: directionLine,
+                stopName: favorite.stopName,
                 source: "small_widget_fav\(favoriteIndex + 1)"
             )
             
@@ -786,7 +828,7 @@ struct SmallFavoriteWidgetView: View {
     var entry: MBTAWidgetEntry
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 // Route badge
                 Text(entry.routeName.displayRouteName)
@@ -799,14 +841,31 @@ struct SmallFavoriteWidgetView: View {
                 
                 Spacer()
                 
-                // Reload indicator
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text("Updated")
-                        .font(.system(size: 7, weight: .medium))
-                        .foregroundColor(.secondary)
-                    Text(entry.date, style: .time)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
+                // Refresh button
+                if #available(iOS 17.0, *) {
+                    Button(intent: RefreshWidgetIntent()) {
+                        VStack(spacing: 2) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                .clipShape(Circle())
+                            Text(entry.date, style: .time)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("Updated")
+                            .font(.system(size: 7, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text(entry.date, style: .time)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
@@ -816,7 +875,7 @@ struct SmallFavoriteWidgetView: View {
                 .lineLimit(2)
                 .foregroundColor(.primary)
             
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             
             // Arrival times
             if let message = entry.message {
@@ -827,7 +886,6 @@ struct SmallFavoriteWidgetView: View {
             } else {
                 VStack(spacing: 4) {
                     ForEach(Array(entry.predictions.prefix(2).enumerated()), id: \.offset) { index, prediction in
-                        // Use dynamic time calculation
                         Text(prediction.formattedMinutes(from: entry.date))
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
@@ -885,7 +943,7 @@ struct SmallFavorite1Widget: Widget {
             SmallFavoriteWidgetView(entry: entry)
         }
         .configurationDisplayName("Favorite 1")
-        .description("Shows next 2 arrivals for your first favorite.")
+        .description("Next 2 arrivals for Favorite 1. Customize in app under Widget Assignments.")
         .supportedFamilies([.systemSmall])
     }
 }
@@ -898,7 +956,7 @@ struct SmallFavorite2Widget: Widget {
             SmallFavoriteWidgetView(entry: entry)
         }
         .configurationDisplayName("Favorite 2")
-        .description("Shows next 2 arrivals for your second favorite.")
+        .description("Next 2 arrivals for Favorite 2. Customize in app under Widget Assignments.")
         .supportedFamilies([.systemSmall])
     }
 }
@@ -1241,10 +1299,55 @@ private enum WidgetSupabaseLogger {
         return newID
     }
     
-    static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, source: String = "widget") {
-        // Simplified - just skip Supabase logging for now
-        // The issue is widgets can't reliably make network calls
-        // Use local logging instead via WidgetAPIUsageStore
+    static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") {
+        Task.detached {
+            do {
+                try await sendLog(endpoint: endpoint, statusCode: statusCode, responseTimeMs: responseTimeMs, routeName: routeName, directionName: directionName, stopName: stopName, source: source)
+            } catch {
+                // Silently fail — logging should never block widget functionality
+            }
+        }
+    }
+    
+    private static func sendLog(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String?, directionName: String?, stopName: String?, source: String) async throws {
+        struct APILog: Codable {
+            let endpoint: String
+            let status_code: Int?
+            let response_time_ms: Int?
+            let route_name: String?
+            let direction_name: String?
+            let stop_name: String?
+            let source: String
+            let timestamp: String
+            let device_id: String
+        }
+        
+        let key = supabaseKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.contains("PLACEHOLDER") else { return }
+        
+        let log = APILog(
+            endpoint: endpoint,
+            status_code: statusCode,
+            response_time_ms: responseTimeMs,
+            route_name: routeName,
+            direction_name: directionName,
+            stop_name: stopName,
+            source: source,
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            device_id: deviceID
+        )
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/api_logs") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue(key, forHTTPHeaderField: "apikey")
+        request.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONEncoder().encode(log)
+        
+        _ = try await URLSession.shared.data(for: request)
     }
 }
 
@@ -1301,7 +1404,7 @@ private struct WidgetVehicleAttributes: Decodable {
 private struct WidgetMBTAService {
     private let apiKey = "6aaf4b37ca464bc298e7573999c87d4d"
 
-    func fetchPredictions(mode: WidgetTransportMode, routeID: String, stopID: String, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
+    func fetchPredictions(mode: WidgetTransportMode, routeID: String, stopID: String, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
         var components = URLComponents(string: "https://api-v3.mbta.com/predictions")!
         components.queryItems = [
             URLQueryItem(name: "filter[route]", value: routeID),
@@ -1327,6 +1430,9 @@ private struct WidgetMBTAService {
                 endpoint: "predictions",
                 statusCode: statusCode,
                 responseTimeMs: responseTime,
+                routeName: routeName,
+                directionName: directionName,
+                stopName: stopName,
                 source: source
             )
             
@@ -1334,7 +1440,7 @@ private struct WidgetMBTAService {
         } catch {
             if !didRecord {
                 WidgetAPIUsageStore.record(url: url, statusCode: nil, source: source)
-                WidgetSupabaseLogger.logAPICall(endpoint: "predictions", statusCode: nil, responseTimeMs: nil, source: source)
+                WidgetSupabaseLogger.logAPICall(endpoint: "predictions", statusCode: nil, responseTimeMs: nil, routeName: routeName, directionName: directionName, stopName: stopName, source: source)
             }
             throw error
         }
