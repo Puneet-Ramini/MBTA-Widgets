@@ -271,3 +271,68 @@ struct VehicleAttributes: Codable {
         case currentStopSequence = "current_stop_sequence"
     }
 }
+
+// MARK: - Alert API Models
+
+struct AlertsResponse: Codable {
+    let data: [AlertData]
+}
+
+struct AlertData: Codable, Identifiable {
+    let id: String
+    let attributes: AlertAttributes
+}
+
+struct AlertAttributes: Codable {
+    let header: String?
+    let description: String?
+    let shortHeader: String?
+    let cause: String?
+    let effect: String?
+    let severity: Int?
+    let lifecycle: String?
+    let serviceEffect: String?
+    let url: String?
+    let updatedAt: String?
+    let activePeriod: [AlertActivePeriod]?
+    let informedEntity: [AlertInformedEntity]?
+
+    enum CodingKeys: String, CodingKey {
+        case header, description, cause, effect, severity, lifecycle, url
+        case shortHeader = "short_header"
+        case serviceEffect = "service_effect"
+        case updatedAt = "updated_at"
+        case activePeriod = "active_period"
+        case informedEntity = "informed_entity"
+    }
+}
+
+struct AlertActivePeriod: Codable {
+    let start: String?
+    let end: String?
+}
+
+struct AlertInformedEntity: Codable {
+    let route: String?
+    let routeType: Int?
+    let stop: String?
+    let directionId: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case route, stop
+        case routeType = "route_type"
+        case directionId = "direction_id"
+    }
+}
+
+/// App-level alert model grouped by route
+struct MBTAAlert: Identifiable {
+    let id: String
+    let header: String
+    let description: String
+    let effect: String
+    let severity: Int
+    let serviceEffect: String
+    let routeIDs: [String]
+    let updatedAt: String
+}
