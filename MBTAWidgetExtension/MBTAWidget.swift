@@ -1288,7 +1288,7 @@ private enum WidgetFirebaseLogger {
     // Firebase project config — hardcoded for widget extension since it can't use FirebaseApp.configure()
     private static let projectID = "mbta-widgets"
     private static let apiKey = "AIzaSyAcIWs06AICYqzTmLNt2vrgLd2rHKdt95c"
-    
+
     static var deviceID: String {
         let defaults = UserDefaults(suiteName: "group.Widgets.MBTA")
         if let existing = defaults?.string(forKey: "deviceID") {
@@ -1298,7 +1298,7 @@ private enum WidgetFirebaseLogger {
         defaults?.set(newID, forKey: "deviceID")
         return newID
     }
-    
+
     static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") {
         Task.detached {
             do {
@@ -1308,11 +1308,11 @@ private enum WidgetFirebaseLogger {
             }
         }
     }
-    
+
     private static func sendLog(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String?, directionName: String?, stopName: String?, source: String) async throws {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let device = deviceID
-        
+
         // Build Firestore document fields
         var fields: [String: Any] = [
             "endpoint": ["stringValue": endpoint],
@@ -1320,7 +1320,7 @@ private enum WidgetFirebaseLogger {
             "timestamp": ["stringValue": timestamp],
             "device_id": ["stringValue": device]
         ]
-        
+
         if let statusCode {
             fields["status_code"] = ["integerValue": String(statusCode)]
         }
@@ -1336,16 +1336,16 @@ private enum WidgetFirebaseLogger {
         if let stopName {
             fields["stop_name"] = ["stringValue": stopName]
         }
-        
+
         let body: [String: Any] = ["fields": fields]
-        
+
         guard let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents/api_logs?key=\(apiKey)") else { return }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        
+
         _ = try await URLSession.shared.data(for: request)
     }
 }
