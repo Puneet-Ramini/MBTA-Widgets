@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MBTA Firebase Usage Dashboard</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f7fb;
+            --card: #ffffff;
+            --border: #d9e2ef;
+            --text: #17324d;
+            --muted: #67809a;
+            --blue: #165baa;
+            --yellow: #f7d85d;
+            --green: #1f9d55;
+            --red: #d64545;
+            --orange: #f59e0b;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            background: linear-gradient(180deg, #eef4fb 0%, var(--bg) 100%);
+            color: var(--text);
+        }
+
+        .page {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1, h2, h3, p { margin: 0; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .header p {
+            color: var(--muted);
+            margin-top: 8px;
+            max-width: 760px;
+            line-height: 1.4;
+        }
+
+        .header-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #fff3e0;
+            color: var(--orange);
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+
+        .timestamp {
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            font-size: 14px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .charts {
+            grid-template-columns: 1fr 1fr;
+            margin-bottom: 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 18px;
+            box-shadow: 0 10px 25px rgba(22, 91, 170, 0.05);
+        }
+
+        .card h2 {
+            font-size: 17px;
+            margin-bottom: 6px;
+        }
+
+        .card .subtext {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.4;
+            margin-bottom: 14px;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            padding: 12px;
+            border-radius: 18px;
+            background: #f8fbff;
+            border: 1px solid #e3ebf6;
+        }
+
+        .metric .value {
+            display: block;
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+
+        .success { color: var(--green); }
+        .failure { color: var(--red); }
+
+        .bars {
+            display: grid;
+            gap: 12px;
+        }
+
+        .bar-row {
+            display: grid;
+            grid-template-columns: 120px 1fr 60px;
+            gap: 12px;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .bar-track {
+            height: 12px;
+            background: #edf2f9;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            width: 0;
+            background: var(--yellow);
+            border-radius: 999px;
+        }
+
+        .source-fill {
+            background: var(--blue);
+        }
+
+        .note {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 10px 0;
+            border-bottom: 1px solid #e7edf6;
+        }
+
+        th { color: var(--muted); font-weight: 600; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #eef4fb;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .status-ok { color: var(--green); font-weight: 600; }
+        .status-err { color: var(--red); font-weight: 600; }
+
+        @media (max-width: 900px) {
+            .charts {
+                grid-template-columns: 1fr;
+            }
+            .metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="header">
+            <div>
+                <h1>MBTA Firebase Usage Dashboard</h1>
+                <div class="header-badge">FIREBASE FIRESTORE</div>
+                <p>Live dashboard reading from Firebase Firestore <code>api_logs</code> collection. Auto-refreshes every 10 seconds.</p>
+            </div>
+            <div class="timestamp" id="timestamp">Refreshing...</div>
+        </section>
+
+        <section class="card" style="margin-bottom: 16px;">
+            <h2>Request Totals</h2>
+            <p class="subtext">Total tracked MBTA API requests stored in Firestore (last 5,000 shown).</p>
+            <div class="metrics">
+                <div class="metric">
+                    <span>Total</span>
+                    <span class="value" id="totalCount">0</span>
+                </div>
+                <div class="metric">
+                    <span>Success</span>
+                    <span class="value success" id="successCount">0</span>
+                </div>
+                <div class="metric">
+                    <span>Failed</span>
+                    <span class="value failure" id="failedCount">0</span>
+                </div>
+                <div class="metric">
+                    <span>Unique Devices</span>
+                    <span class="value" id="uniqueDevices">0</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid charts">
+            <article class="card">
+                <h2>Requests by Endpoint</h2>
+                <p class="subtext">Which MBTA API endpoints are being called.</p>
+                <div class="bars" id="endpointBars"></div>
+            </article>
+
+            <article class="card">
+                <h2>Requests by Source</h2>
+                <p class="subtext">Splits usage between app, widget, and other sources.</p>
+                <div class="bars" id="sourceBars"></div>
+            </article>
+        </section>
+
+        <section class="card">
+            <h2>Recent Requests</h2>
+            <p class="subtext">Last 20 MBTA API calls from all devices.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Endpoint</th>
+                        <th>Route</th>
+                        <th>Stop</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th>Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="recentRequests"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        function setText(id, value) {
+            document.getElementById(id).textContent = value;
+        }
+
+        function renderBars(containerId, entries, fillClass = "") {
+            const container = document.getElementById(containerId);
+            container.innerHTML = "";
+
+            if (entries.length === 0) {
+                container.innerHTML = "<p class='note'>No requests tracked yet.</p>";
+                return;
+            }
+
+            const maxValue = Math.max(...entries.map((e) => e.value), 1);
+            entries.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "bar-row";
+                const percent = (entry.value / maxValue) * 100;
+                row.innerHTML = `
+                    <div>${entry.label}</div>
+                    <div class="bar-track">
+                        <div class="bar-fill ${fillClass}" style="width:${percent}%"></div>
+                    </div>
+                    <div>${entry.value}</div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function renderRecent(events) {
+            const tbody = document.getElementById("recentRequests");
+            tbody.innerHTML = "";
+
+            if (events.length === 0) {
+                tbody.innerHTML = "<tr><td colspan='7'>No tracked requests yet.</td></tr>";
+                return;
+            }
+
+            events.slice(0, 20).forEach((event) => {
+                const row = document.createElement("tr");
+                const status = event.statusCode;
+                const statusClass = status == null ? "" : (status >= 200 && status <= 299 ? "status-ok" : "status-err");
+                const statusText = status ?? "\u2014";
+                const time = event.timestamp
+                    ? new Date(event.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })
+                    : "--";
+                const latency = event.responseTimeMs ? `${event.responseTimeMs}ms` : "--";
+                const route = event.routeName || "--";
+                const stop = event.stopName || "--";
+                row.innerHTML = `
+                    <td>${time}</td>
+                    <td><span class="badge">${event.endpoint}</span></td>
+                    <td>${route}</td>
+                    <td>${stop}</td>
+                    <td>${event.source}</td>
+                    <td class="${statusClass}">${statusText}</td>
+                    <td>${latency}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function refresh() {
+            try {
+                const response = await fetch("/api/stats", { cache: "no-store" });
+                const stats = await response.json();
+
+                setText("totalCount", stats.totalRequests.toLocaleString());
+                setText("successCount", stats.successRequests.toLocaleString());
+                setText("failedCount", stats.failedRequests.toLocaleString());
+                setText("uniqueDevices", stats.uniqueDevices);
+                setText(
+                    "timestamp",
+                    stats.lastUpdated
+                        ? `Updated ${new Date(stats.lastUpdated).toLocaleTimeString()}`
+                        : "Waiting for first request"
+                );
+
+                renderBars(
+                    "endpointBars",
+                    Object.entries(stats.endpointCounts || {})
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([label, value]) => ({ label, value }))
+                );
+
+                renderBars(
+                    "sourceBars",
+                    Object.entries(stats.sourceCounts || {})
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([label, value]) => ({ label, value })),
+                    "source-fill"
+                );
+
+                renderRecent(stats.recentRequests || []);
+            } catch (err) {
+                console.error("Dashboard refresh error:", err);
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 10000);
+    </script>
+</body>
+</html>
