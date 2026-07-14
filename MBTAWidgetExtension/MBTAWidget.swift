@@ -1283,12 +1283,12 @@ private struct WidgetStoredFavorite: Decodable {
     let stopName: String
 }
 
-// MARK: - Widget Supabase Logging
-private enum WidgetSupabaseLogger {
-    // Hardcode the values for widget extension since it can't access main bundle
-    private static let supabaseURL = "https://ifooqfgcpeczamayyzja.supabase.co"
-    private static let supabaseKey = "sb_publishable_woKkE6OsLhUo7KaJLxvUSQ_RuV2-oI6"
-    
+// MARK: - Widget Firebase Logging
+private enum WidgetFirebaseLogger {
+    // Firebase project config — hardcoded for widget extension since it can't use FirebaseApp.configure()
+    private static let projectID = "mbta-widgets"
+    private static let apiKey = "AIzaSyAcIWs06AICYqzTmLNt2vrgLd2rHKdt95c"
+
     static var deviceID: String {
         let defaults = UserDefaults(suiteName: "group.Widgets.MBTA")
         if let existing = defaults?.string(forKey: "deviceID") {
@@ -1298,7 +1298,7 @@ private enum WidgetSupabaseLogger {
         defaults?.set(newID, forKey: "deviceID")
         return newID
     }
-    
+
     static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") {
         Task.detached {
             do {
@@ -1308,45 +1308,44 @@ private enum WidgetSupabaseLogger {
             }
         }
     }
-    
+
     private static func sendLog(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String?, directionName: String?, stopName: String?, source: String) async throws {
-        struct APILog: Codable {
-            let endpoint: String
-            let status_code: Int?
-            let response_time_ms: Int?
-            let route_name: String?
-            let direction_name: String?
-            let stop_name: String?
-            let source: String
-            let timestamp: String
-            let device_id: String
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let device = deviceID
+
+        // Build Firestore document fields
+        var fields: [String: Any] = [
+            "endpoint": ["stringValue": endpoint],
+            "source": ["stringValue": source],
+            "timestamp": ["stringValue": timestamp],
+            "device_id": ["stringValue": device]
+        ]
+
+        if let statusCode {
+            fields["status_code"] = ["integerValue": String(statusCode)]
         }
-        
-        let key = supabaseKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, !key.contains("PLACEHOLDER") else { return }
-        
-        let log = APILog(
-            endpoint: endpoint,
-            status_code: statusCode,
-            response_time_ms: responseTimeMs,
-            route_name: routeName,
-            direction_name: directionName,
-            stop_name: stopName,
-            source: source,
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            device_id: deviceID
-        )
-        
-        guard let url = URL(string: "\(supabaseURL)/rest/v1/api_logs") else { return }
-        
+        if let responseTimeMs {
+            fields["response_time_ms"] = ["integerValue": String(responseTimeMs)]
+        }
+        if let routeName {
+            fields["route_name"] = ["stringValue": routeName]
+        }
+        if let directionName {
+            fields["direction_name"] = ["stringValue": directionName]
+        }
+        if let stopName {
+            fields["stop_name"] = ["stringValue": stopName]
+        }
+
+        let body: [String: Any] = ["fields": fields]
+
+        guard let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents/api_logs?key=\(apiKey)") else { return }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.addValue(key, forHTTPHeaderField: "apikey")
-        request.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("return=minimal", forHTTPHeaderField: "Prefer")
-        request.httpBody = try JSONEncoder().encode(log)
-        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
         _ = try await URLSession.shared.data(for: request)
     }
 }
@@ -1425,8 +1424,8 @@ private struct WidgetMBTAService {
             let statusCode = (response as? HTTPURLResponse)?.statusCode
             WidgetAPIUsageStore.record(url: url, statusCode: statusCode, source: source)
             
-            // Log to Supabase
-            WidgetSupabaseLogger.logAPICall(
+            // Log to Firebase
+            WidgetFirebaseLogger.logAPICall(
                 endpoint: "predictions",
                 statusCode: statusCode,
                 responseTimeMs: responseTime,
@@ -1440,7 +1439,7 @@ private struct WidgetMBTAService {
         } catch {
             if !didRecord {
                 WidgetAPIUsageStore.record(url: url, statusCode: nil, source: source)
-                WidgetSupabaseLogger.logAPICall(endpoint: "predictions", statusCode: nil, responseTimeMs: nil, routeName: routeName, directionName: directionName, stopName: stopName, source: source)
+                WidgetFirebaseLogger.logAPICall(endpoint: "predictions", statusCode: nil, responseTimeMs: nil, routeName: routeName, directionName: directionName, stopName: stopName, source: source)
             }
             throw error
         }
@@ -1513,8 +1512,8 @@ private struct WidgetMBTAService {
             let statusCode = (response as? HTTPURLResponse)?.statusCode
             WidgetAPIUsageStore.record(url: url, statusCode: statusCode, source: source)
             
-            // Log to Supabase
-            WidgetSupabaseLogger.logAPICall(
+            // Log to Firebase
+            WidgetFirebaseLogger.logAPICall(
                 endpoint: "vehicles",
                 statusCode: statusCode,
                 responseTimeMs: responseTime,
@@ -1525,7 +1524,7 @@ private struct WidgetMBTAService {
         } catch {
             if !didRecord {
                 WidgetAPIUsageStore.record(url: url, statusCode: nil, source: source)
-                WidgetSupabaseLogger.logAPICall(endpoint: "vehicles", statusCode: nil, responseTimeMs: nil, source: source)
+                WidgetFirebaseLogger.logAPICall(endpoint: "vehicles", statusCode: nil, responseTimeMs: nil, source: source)
             }
             throw error
         }

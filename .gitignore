@@ -1,0 +1,13 @@
+# Firebase service account key (secrets)
+FirebaseDashboard/serviceAccountKey.json
+
+# Xcode user data
+MBTA.xcodeproj/project.xcworkspace/xcuserdata/
+MBTA.xcodeproj/project.xcworkspace/xcshareddata/
+
+# Python caches
+UsageDashboard/__pycache__/
+UsageDashboard/*.log
+
+# Supabase local
+supabase/

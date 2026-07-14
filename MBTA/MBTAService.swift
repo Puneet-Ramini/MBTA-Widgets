@@ -35,9 +35,9 @@ final class MBTAService {
             APIUsageStore.record(url: url, statusCode: statusCode, source: "app")
             didRecord = true
             
-            // Supabase monitoring (silent background logging)
+            // Firebase monitoring (silent background logging)
             let endpoint = url.path.replacingOccurrences(of: "/", with: "")
-            SupabaseMonitoring.shared.logAPICall(
+            FirebaseMonitoring.shared.logAPICall(
                 endpoint: endpoint,
                 statusCode: statusCode,
                 responseTimeMs: responseTime,
@@ -57,9 +57,9 @@ final class MBTAService {
             if !didRecord {
                 APIUsageStore.record(url: url, statusCode: nil, source: "app")
                 
-                // Log error to Supabase
+                // Log error to Firebase
                 let endpoint = url.path.replacingOccurrences(of: "/", with: "")
-                SupabaseMonitoring.shared.logAPICall(endpoint: endpoint, statusCode: nil, routeName: routeName, directionName: directionName, stopName: stopName)
+                FirebaseMonitoring.shared.logAPICall(endpoint: endpoint, statusCode: nil, routeName: routeName, directionName: directionName, stopName: stopName)
             }
             throw error
         }
