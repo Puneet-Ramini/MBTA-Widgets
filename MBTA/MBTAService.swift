@@ -248,4 +248,34 @@ final class MBTAService {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .joined()
     }
+
+    /// Fetch all currently active alerts, optionally filtered by route IDs.
+    func fetchAlerts(routeIDs: [String]? = nil) async throws -> [MBTAAlert] {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "filter[datetime]", value: "NOW")
+        ]
+        if let routeIDs, !routeIDs.isEmpty {
+            queryItems.append(URLQueryItem(name: "filter[route]", value: routeIDs.joined(separator: ",")))
+        }
+
+        let url = try buildURL(path: "alerts", queryItems: queryItems)
+        let response = try await fetch(AlertsResponse.self, from: url)
+
+        return response.data.compactMap { alert in
+            let attrs = alert.attributes
+            let routes = (attrs.informedEntity ?? []).compactMap { $0.route }
+            let uniqueRoutes = Array(Set(routes))
+
+            return MBTAAlert(
+                id: alert.id,
+                header: attrs.header ?? "",
+                description: attrs.description ?? "",
+                effect: attrs.effect ?? "UNKNOWN",
+                severity: attrs.severity ?? 0,
+                serviceEffect: attrs.serviceEffect ?? "",
+                routeIDs: uniqueRoutes,
+                updatedAt: attrs.updatedAt ?? ""
+            )
+        }
+    }
 }

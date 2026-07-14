@@ -149,6 +149,23 @@ final class ArrivalsViewModel: ObservableObject {
     @Published var selectedMode: TransportMode = .bus
     @Published var quickFavorites: [SavedFavorite?] = Array(repeating: nil, count: 4)
     @Published var selectedPresetLineQuery: String? = nil
+    
+    /// Cached arrival times for each favorite, keyed by favorite id
+    @Published var shortcutArrivals: [String: [BusArrival]] = [:]
+    
+    /// All currently active alerts
+    @Published var allAlerts: [MBTAAlert] = []
+    @Published var isLoadingAlerts: Bool = false
+    
+    /// Number of alerts affecting saved favorite routes
+    var favoriteAlertCount: Int {
+        let favoriteRouteIDs = Set(quickFavorites.compactMap { $0?.routeID })
+        guard !favoriteRouteIDs.isEmpty else { return 0 }
+        return allAlerts.filter { alert in
+            alert.routeIDs.contains(where: { favoriteRouteIDs.contains($0) })
+        }.count
+    }
+    
     @Published var widgetDefaultFavorite: SavedFavorite? = nil
     @Published var widgetOverrides: [WidgetScheduleOverride] = []
 
@@ -214,6 +231,57 @@ final class ArrivalsViewModel: ObservableObject {
         } catch {
             // Non-critical, autocomplete just won't work
         }
+    }
+    
+    /// Fetches arrival predictions for all saved shortcuts (for the Home screen cards).
+    func loadShortcutArrivals() async {
+        let favorites = quickFavorites.compactMap { $0 }
+        guard !favorites.isEmpty else { return }
+        
+        await withTaskGroup(of: (String, [BusArrival]).self) { group in
+            for favorite in favorites {
+                group.addTask {
+                    do {
+                        let allPredictions = try await MBTAService.shared.fetchPredictions(
+                            stopId: favorite.stopID,
+                            routeId: favorite.routeID,
+                            routeName: favorite.routeName,
+                            stopName: favorite.stopName
+                        )
+                        let filtered = allPredictions
+                            .filter { $0.directionId == favorite.directionID }
+                        return (favorite.id, Array(filtered.prefix(2)))
+                    } catch {
+                        return (favorite.id, [])
+                    }
+                }
+            }
+            
+            var results: [String: [BusArrival]] = [:]
+            for await (id, arrivals) in group {
+                results[id] = arrivals
+            }
+            
+            self.shortcutArrivals = results
+        }
+    }
+    
+    /// Removes a saved favorite at the given index.
+    func removeFavorite(at index: Int) {
+        guard quickFavorites.indices.contains(index) else { return }
+        quickFavorites[index] = nil
+        saveQuickRoutes()
+    }
+    
+    /// Fetches all currently active alerts from the MBTA API.
+    func loadAlerts() async {
+        isLoadingAlerts = true
+        do {
+            allAlerts = try await MBTAService.shared.fetchAlerts()
+        } catch {
+            // Silent fail — alerts are non-critical
+        }
+        isLoadingAlerts = false
     }
     
     deinit {

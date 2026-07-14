@@ -40,7 +40,7 @@ extension View {
 }
 
 struct ContentView: View {
-    @StateObject private var viewModel = ArrivalsViewModel()
+    @ObservedObject var viewModel: ArrivalsViewModel
     @State private var isShowingFavoritePicker = false
     @State private var isShowingWidgetCustomization = false
     @State private var isShowingAbout = false
@@ -52,7 +52,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(.systemGroupedBackground)
+                Color.black
                     .ignoresSafeArea()
                 
                 ScrollView(showsIndicators: false) {
@@ -102,6 +102,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
+                    .padding(.bottom, 70) // clearance for custom tab bar
                 }
                 .refreshable {
                     guard !isPickingPrediction else { return }
@@ -142,14 +143,6 @@ struct ContentView: View {
             }
             .navigationDestination(isPresented: $isShowingAbout) {
                 AboutView()
-            }
-            .onOpenURL { url in
-                // Handle widget deep link
-                if url.scheme == "mbta-widget", url.host == "open" {
-                    Task {
-                        await viewModel.loadFromWidget(url: url)
-                    }
-                }
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
@@ -1107,7 +1100,7 @@ struct ContentView: View {
     }
 }
 
-private struct WidgetCustomizationView: View {
+struct WidgetCustomizationView: View {
     @ObservedObject var viewModel: ArrivalsViewModel
     @State private var editingDefault = false
     @State private var expandedOverrideID: String? = nil
@@ -2277,5 +2270,5 @@ private extension String {
 }
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: ArrivalsViewModel())
 }

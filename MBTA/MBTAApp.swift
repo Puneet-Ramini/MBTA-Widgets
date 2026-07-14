@@ -44,8 +44,8 @@ struct MBTAApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .preferredColorScheme(.light)
+            MainTabView()
+                .preferredColorScheme(.dark)
                 .onAppear {
                     updateChecker.checkIfNeeded()
                 }
