@@ -100,8 +100,8 @@ struct MainTabView: View {
             tabBarItem(tab: .more, icon: "ellipsis", label: "More")
         }
         .padding(.horizontal, 28)
-        .padding(.top, 12)
-        .padding(.bottom, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
         .background(
             Rectangle()
                 .fill(Color(white: 0.08))

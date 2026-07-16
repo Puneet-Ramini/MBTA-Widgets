@@ -253,8 +253,9 @@ struct HomeView: View {
                 Text(shortcutDestination(for: favorite))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.7))
-                    .lineLimit(1)
-                
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+
                 Spacer(minLength: 0)
                 
                 // Primary arrival time — single line always
@@ -407,18 +408,20 @@ struct HomeView: View {
             return favorite.routeName
         }
         
-        // Green Line branches — just the letter
-        if route.contains("GREEN-B") { return "B" }
-        if route.contains("GREEN-C") { return "C" }
-        if route.contains("GREEN-D") { return "D" }
-        if route.contains("GREEN-E") { return "E" }
-        
-        // Subway / Commuter Rail — show short destination
-        let dest = favorite.directionDestination
-            .replacingOccurrences(of: " Station", with: "")
-            .replacingOccurrences(of: " Square", with: " Sq")
-        if !dest.isEmpty { return dest }
-        
+        // Subway lines — short name
+        if route.contains("ORANGE") { return "Orange" }
+        if route.contains("RED") || route.contains("MATTAPAN") { return "Red" }
+        if route.contains("BLUE") { return "Blue" }
+
+        // Green Line branches
+        if route.contains("GREEN-B") { return "Green B" }
+        if route.contains("GREEN-C") { return "Green C" }
+        if route.contains("GREEN-D") { return "Green D" }
+        if route.contains("GREEN-E") { return "Green E" }
+
+        // Commuter Rail
+        if route.starts(with: "CR-") { return "CR" }
+
         return favorite.routeName
     }
     
