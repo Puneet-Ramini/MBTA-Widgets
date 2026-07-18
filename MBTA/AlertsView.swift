@@ -11,6 +11,7 @@ struct AlertsView: View {
     @ObservedObject var viewModel: ArrivalsViewModel
     @State private var expandedRouteID: String? = nil
     @State private var expandedAlertID: String? = nil
+    @State private var expandedMode: TransportMode? = nil
     
     private let accentPink = Color(red: 232/255, green: 54/255, blue: 101/255)
     private let cardBackground = Color(white: 0.12)
@@ -98,39 +99,74 @@ struct AlertsView: View {
         }
     }
     
-    // MARK: - Mode Section
-    
+    // MARK: - Mode Section (collapsible dropdown)
+
     @ViewBuilder
     private func modeSection(title: String, mode: TransportMode) -> some View {
         let routeGroups = alertsGroupedByRoute(for: mode)
-        
+        let totalAlerts = routeGroups.reduce(0) { $0 + $1.alerts.count }
+        let isExpanded = expandedMode == mode
+
         if !routeGroups.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                // Section header
-                HStack(spacing: 8) {
-                    Image(systemName: modeIcon(for: mode))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(modeColor(for: mode))
-                    
-                    Text(title)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text("\(routeGroups.count)")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white.opacity(0.5))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule().fill(Color.white.opacity(0.1))
-                        )
+            VStack(alignment: .leading, spacing: 0) {
+                // Tappable header
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        expandedMode = isExpanded ? nil : mode
+                        if !isExpanded {
+                            expandedRouteID = nil
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: modeIcon(for: mode))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(modeColor(for: mode))
+
+                        Text(title)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Text("\(totalAlerts)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule().fill(Color.white.opacity(0.1))
+                            )
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.3))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                    .padding(14)
                 }
-                
-                // Route tiles
-                ForEach(routeGroups, id: \.routeID) { group in
-                    routeTile(group: group)
+                .buttonStyle(.plain)
+
+                // Expanded route tiles
+                if isExpanded {
+                    VStack(spacing: 8) {
+                        ForEach(routeGroups, id: \.routeID) { group in
+                            routeTile(group: group)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(cardBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(cardBorder, lineWidth: 1)
+                    )
+            )
         }
     }
     
@@ -191,15 +227,11 @@ struct AlertsView: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(cardBorder, lineWidth: 1)
-                )
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.04))
         )
     }
-    
+
     // MARK: - Alert Card
     
     private func alertCard(_ alert: MBTAAlert) -> some View {

@@ -39,6 +39,20 @@ extension View {
     }
 }
 
+// MARK: - Recent Search Model
+
+struct RecentSearch: Codable, Identifiable, Equatable {
+    let routeID: String
+    let routeName: String
+    let mode: TransportMode
+    let directionID: Int
+    let directionDestination: String
+    let stopID: String
+    let stopName: String
+
+    var id: String { "\(routeID)-\(directionID)-\(stopID)" }
+}
+
 struct ContentView: View {
     @ObservedObject var viewModel: ArrivalsViewModel
     @State private var isShowingFavoritePicker = false
@@ -47,6 +61,11 @@ struct ContentView: View {
     @State private var isPickingPrediction = false
     @State private var selectedPredictionArrivalTime: Date? = nil
     @State private var showIslandHint = false
+    @State private var isLanding = true
+    @State private var recentSearches: [RecentSearch] = []
+    @State private var isShowingBusRoutes = false
+    @State private var isShowingSubwayLines = false
+    @State private var isShowingCommuterRailLines = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -56,59 +75,28 @@ struct ContentView: View {
                     .ignoresSafeArea()
                 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Header with better typography
-                        Text("MBTA Schedules")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.primary, .primary.opacity(0.7)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .padding(.top, -8)
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-
-                        quickRoutesSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        modeSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        routeSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        directionSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        stopSelectorSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        statusSection
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        resultsSection
-                        widgetButton
-                            .padding(.bottom, 8)
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
-                        
-                        aboutButton
-                            .padding(.bottom, 20)
-                            .blur(radius: isPickingPrediction ? 6 : 0)
-                            .allowsHitTesting(!isPickingPrediction)
+                    if isLanding {
+                        landingContent
+                    } else {
+                        activeSearchContent
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .padding(.bottom, 70) // clearance for custom tab bar
                 }
                 .refreshable {
                     guard !isPickingPrediction else { return }
                     await viewModel.loadArrivals()
                 }
                 .scrollDisabled(isPickingPrediction)
+                .onAppear {
+                    loadRecentSearches()
+                    if viewModel.selectedRoute != nil || !viewModel.routeInput.isEmpty {
+                        isLanding = false
+                    }
+                }
+                .onChange(of: viewModel.routeInput) { _, newInput in
+                    if !newInput.isEmpty {
+                        isLanding = false
+                    }
+                }
                 
 
             }
@@ -119,6 +107,8 @@ struct ContentView: View {
                 guard viewModel.selectedStopID != nil else {
                     return
                 }
+
+                saveRecentSearch()
 
                 Task {
                     await viewModel.loadArrivals()
@@ -144,6 +134,15 @@ struct ContentView: View {
             .navigationDestination(isPresented: $isShowingAbout) {
                 AboutView()
             }
+            .navigationDestination(isPresented: $isShowingBusRoutes) {
+                BusRoutesView(viewModel: viewModel)
+            }
+            .navigationDestination(isPresented: $isShowingSubwayLines) {
+                SubwayLinesView(viewModel: viewModel)
+            }
+            .navigationDestination(isPresented: $isShowingCommuterRailLines) {
+                CommuterRailLinesView(viewModel: viewModel)
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     // Re-fetch arrivals when app returns to foreground
@@ -151,6 +150,359 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Content Wrappers
+
+    private var landingContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            landingHeader
+            modeCardsSection
+            recentSearchesSection
+                .padding(.top, 4)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .padding(.bottom, 70)
+    }
+
+    private var activeSearchContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            activeSearchHeader
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            quickRoutesSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            modeSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            routeSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            directionSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            stopSelectorSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            statusSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            resultsSection
+            widgetButton
+                .padding(.bottom, 8)
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+            aboutButton
+                .padding(.bottom, 20)
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .padding(.bottom, 70)
+    }
+
+    // MARK: - Landing Header
+
+    private var landingHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Explore")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(.white)
+
+            Text("Choose a mode to get started")
+                .font(.system(size: 15))
+                .foregroundColor(.white.opacity(0.45))
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: - Active Search Header
+
+    private var activeSearchHeader: some View {
+        HStack {
+            Text("Explore")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(.white)
+
+            Spacer()
+
+            Button {
+                haptic()
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isLanding = true
+                }
+                viewModel.handleModeChange()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, -8)
+    }
+
+    // MARK: - Mode Cards
+
+    private var modeCardsSection: some View {
+        HStack(alignment: .top, spacing: 8) {
+            // Bus card navigates to dedicated BusRoutesView
+            Button {
+                haptic(.medium)
+                isShowingBusRoutes = true
+            } label: {
+                Image("MBTABus")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+
+            // Subway card navigates to dedicated SubwayLinesView
+            Button {
+                haptic(.medium)
+                isShowingSubwayLines = true
+            } label: {
+                Image("MBTASubway")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+
+            // Commuter Rail card navigates to dedicated CommuterRailLinesView
+            Button {
+                haptic(.medium)
+                isShowingCommuterRailLines = true
+            } label: {
+                Image("MBTACommuterRail")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, -8)
+        .padding(.top, 4)
+    }
+
+    private func modeCard(mode: TransportMode, imageName: String, label: String) -> some View {
+        Button {
+            haptic(.medium)
+            viewModel.selectedMode = mode
+            viewModel.handleModeChange()
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isLanding = false
+            }
+        } label: {
+            Image(imageName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Recent Searches
+
+    private var recentSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header with Clear All
+            HStack {
+                Text("Recent Searches")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+
+                Spacer()
+
+                if !recentSearches.isEmpty {
+                    Button {
+                        haptic()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            recentSearches.removeAll()
+                        }
+                        UserDefaults.standard.removeObject(forKey: "recentSearches")
+                    } label: {
+                        Text("Clear All")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if recentSearches.isEmpty {
+                // Empty state
+                HStack {
+                    Spacer()
+                    Text("Your recent searches will appear here")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.25))
+                    Spacer()
+                }
+                .padding(.vertical, 16)
+            } else {
+                // Search rows
+                VStack(spacing: 0) {
+                    ForEach(Array(recentSearches.enumerated()), id: \.element.id) { index, recent in
+                        Button {
+                            haptic()
+                            let fav = SavedFavorite(
+                                mode: recent.mode,
+                                routeID: recent.routeID,
+                                routeName: recent.routeName,
+                                directionID: recent.directionID,
+                                directionName: "",
+                                directionDestination: recent.directionDestination,
+                                stopID: recent.stopID,
+                                stopName: recent.stopName
+                            )
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isLanding = false
+                            }
+                            Task {
+                                await viewModel.loadFavorite(fav)
+                            }
+                        } label: {
+                            recentSearchRow(recent, isLast: index == recentSearches.count - 1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(white: 0.10))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    private func recentSearchRow(_ recent: RecentSearch, isLast: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                recentBadge(for: recent)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recentPrimaryText(recent))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Text(recentSecondaryText(recent))
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.2))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            if !isLast {
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(height: 0.5)
+                    .padding(.leading, 58)
+            }
+        }
+    }
+
+    private func recentBadge(for recent: RecentSearch) -> some View {
+        let route = recent.routeID.uppercased()
+        let color: Color = {
+            if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+                return Color(red: 255/255, green: 200/255, blue: 0/255)
+            }
+            if route.contains("RED") || route.contains("MATTAPAN") { return Color(red: 218/255, green: 41/255, blue: 28/255) }
+            if route.contains("ORANGE") { return Color(red: 237/255, green: 139/255, blue: 0/255) }
+            if route.contains("BLUE") { return Color(red: 0/255, green: 115/255, blue: 207/255) }
+            if route.contains("GREEN") { return Color(red: 0/255, green: 132/255, blue: 61/255) }
+            if route.starts(with: "CR-") { return .purple }
+            return Color(red: 255/255, green: 200/255, blue: 0/255)
+        }()
+        let textColor: Color = (route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT")) ? .black : .white
+
+        let badgeText: String = {
+            if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+                return recent.routeName
+            }
+            if route.contains("ORANGE") { return "OL" }
+            if route.contains("RED") || route.contains("MATTAPAN") { return "RL" }
+            if route.contains("BLUE") { return "BL" }
+            if route.contains("GREEN-B") { return "B" }
+            if route.contains("GREEN-C") { return "C" }
+            if route.contains("GREEN-D") { return "D" }
+            if route.contains("GREEN-E") { return "E" }
+            if route.starts(with: "CR-") { return "CR" }
+            return recent.routeName
+        }()
+
+        return Text(badgeText)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(textColor)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(color))
+    }
+
+    private func recentPrimaryText(_ recent: RecentSearch) -> String {
+        let route = recent.routeID.uppercased()
+        // For subway/rail, show the destination; for bus, show "Harvard Square" etc.
+        if !recent.directionDestination.isEmpty {
+            return recent.directionDestination
+                .replacingOccurrences(of: " Station", with: "")
+        }
+        return recent.stopName
+            .replacingOccurrences(of: " Station", with: "")
+    }
+
+    private func recentSecondaryText(_ recent: RecentSearch) -> String {
+        return recent.stopName
+            .replacingOccurrences(of: " Station", with: "")
+    }
+
+    // MARK: - Recent Search Persistence
+
+    private func saveRecentSearch() {
+        guard let route = viewModel.selectedRoute,
+              let directionID = viewModel.selectedDirectionID,
+              let direction = viewModel.directions.first(where: { $0.id == directionID }),
+              let stop = viewModel.selectedStop else { return }
+
+        let entry = RecentSearch(
+            routeID: route.id,
+            routeName: route.displayName,
+            mode: viewModel.selectedMode,
+            directionID: directionID,
+            directionDestination: direction.destination,
+            stopID: stop.id,
+            stopName: stop.name
+        )
+
+        // Remove duplicate, then insert at front
+        recentSearches.removeAll { $0.id == entry.id }
+        recentSearches.insert(entry, at: 0)
+        if recentSearches.count > 6 {
+            recentSearches = Array(recentSearches.prefix(6))
+        }
+
+        if let data = try? JSONEncoder().encode(recentSearches) {
+            UserDefaults.standard.set(data, forKey: "recentSearches")
+        }
+    }
+
+    private func loadRecentSearches() {
+        guard let data = UserDefaults.standard.data(forKey: "recentSearches"),
+              let decoded = try? JSONDecoder().decode([RecentSearch].self, from: data) else { return }
+        recentSearches = decoded
     }
 
     private var quickRoutesSection: some View {
@@ -1968,7 +2320,7 @@ private struct AboutView: View {
 
 // MARK: - Instructions View
 
-private struct InstructionsView: View {
+struct InstructionsView: View {
     private struct InstructionStep: Identifiable {
         let id: Int
         let title: String
@@ -2103,7 +2455,7 @@ private struct InstructionsView: View {
     }
 }
 
-private struct ZoomOverlay: View {
+struct ZoomOverlay: View {
     let imageName: String
     let onDismiss: () -> Void
     
