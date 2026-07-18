@@ -58,7 +58,7 @@ struct MainTabView: View {
                     AlertsView(viewModel: viewModel)
                     
                 case .more:
-                    MorePlaceholderView()
+                    MoreView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -131,26 +131,3 @@ struct MainTabView: View {
     }
 }
 
-// MARK: - Placeholder Views
-
-private struct MorePlaceholderView: View {
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                Image(systemName: "ellipsis.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundColor(Color(white: 0.3))
-                
-                Text("More")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                
-                Text("Coming soon")
-                    .font(.system(size: 15))
-                    .foregroundColor(Color(white: 0.5))
-            }
-        }
-    }
-}

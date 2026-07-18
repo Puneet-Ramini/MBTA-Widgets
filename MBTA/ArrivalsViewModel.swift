@@ -907,7 +907,7 @@ final class ArrivalsViewModel: ObservableObject {
         WidgetSharedStore.saveConfiguration(configuration)
     }
 
-    private func loadFavorite(_ favorite: SavedFavorite) async {
+    func loadFavorite(_ favorite: SavedFavorite) async {
         selectedMode = favorite.mode
         selectedPresetLineQuery = favorite.routeID
         routeInput = favorite.routeID
