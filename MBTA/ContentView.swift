@@ -57,6 +57,7 @@ struct ContentView: View {
     @ObservedObject var viewModel: ArrivalsViewModel
     @State private var isShowingFavoritePicker = false
     @State private var isShowingWidgetCustomization = false
+    @State private var isShowingWidgetAssignment = false
     @State private var isShowingAbout = false
     @State private var isPickingPrediction = false
     @State private var selectedPredictionArrivalTime: Date? = nil
@@ -68,11 +69,29 @@ struct ContentView: View {
     @State private var isShowingCommuterRailLines = false
     @Environment(\.scenePhase) private var scenePhase
 
+    private var showRouteDetails: Bool {
+        !isLanding && viewModel.selectedRoute != nil && !viewModel.directions.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black
+                // Background: gradient for route details, solid black otherwise
+                if showRouteDetails {
+                    LinearGradient(
+                        stops: [
+                            .init(color: routeAccentColor.opacity(0.35), location: 0),
+                            .init(color: routeAccentColor.opacity(0.15), location: 0.35),
+                            .init(color: Color.black, location: 0.7)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                     .ignoresSafeArea()
+                } else {
+                    Color.black
+                        .ignoresSafeArea()
+                }
                 
                 ScrollView(showsIndicators: false) {
                     if isLanding {
@@ -143,6 +162,30 @@ struct ContentView: View {
             .navigationDestination(isPresented: $isShowingCommuterRailLines) {
                 CommuterRailLinesView(viewModel: viewModel)
             }
+            .sheet(isPresented: $isShowingWidgetAssignment) {
+                WidgetAssignmentSheet(viewModel: viewModel)
+                    .presentationDetents([.large])
+                    .presentationBackground(Color.black)
+                    .presentationCornerRadius(24)
+            }
+            .onChange(of: viewModel.directions) { _, newDirections in
+                // When directions load (route is ready), dismiss any mode selection views
+                // and auto-select the first direction
+                if !newDirections.isEmpty && viewModel.selectedRoute != nil {
+                    isShowingBusRoutes = false
+                    isShowingSubwayLines = false
+                    isShowingCommuterRailLines = false
+                    isLanding = false
+
+                    // Auto-select first direction if none selected
+                    if viewModel.selectedDirectionID == nil, let firstDir = newDirections.first {
+                        viewModel.selectedDirectionID = firstDir.id
+                        Task {
+                            await viewModel.selectDirection(firstDir.id)
+                        }
+                    }
+                }
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     // Re-fetch arrivals when app returns to foreground
@@ -166,42 +209,70 @@ struct ContentView: View {
         .padding(.bottom, 70)
     }
 
+    @ViewBuilder
     private var activeSearchContent: some View {
+        if viewModel.selectedRoute != nil && !viewModel.directions.isEmpty {
+            routeDetailsContent
+        } else {
+            routeSelectionContent
+        }
+    }
+
+    /// Step-by-step route selection (mode → route → direction → stop)
+    private var routeSelectionContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             activeSearchHeader
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             quickRoutesSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             modeSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             routeSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             directionSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             stopSelectorSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
             statusSection
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
-            resultsSection
-            widgetButton
-                .padding(.bottom, 8)
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
-            aboutButton
-                .padding(.bottom, 20)
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .padding(.bottom, 70)
+    }
+
+    /// Premium route details page shown after a route is selected
+    private var routeDetailsContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Header with back, favorite, refresh
+            routeDetailsHeader
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+
+            // Route badge + destination title
+            routeDetailsTitle
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+
+            // Direction swap card
+            redesignedDirectionSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+
+            // Stop selector card
+            redesignedStopSelector
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+
+            // Status / error
+            statusSection
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+
+            // Upcoming arrivals
+            redesignedResultsSection
+
+            // Action cards
+            redesignedActionCards
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 100)
     }
 
     // MARK: - Landing Header
@@ -243,6 +314,660 @@ struct ContentView: View {
             .buttonStyle(.plain)
         }
         .padding(.top, -8)
+    }
+
+    // MARK: - Route Details Header
+
+    private var routeDetailsHeader: some View {
+        HStack {
+            // Back button
+            Button {
+                haptic()
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isLanding = true
+                }
+                viewModel.handleModeChange()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            // Favorite button
+            Button {
+                haptic()
+                isShowingFavoritePicker = true
+            } label: {
+                Image(systemName: isCurrentSelectionAlreadyFavorited ? "star.fill" : "star")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(isCurrentSelectionAlreadyFavorited ? .yellow : .white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
+            .disabled(isCurrentSelectionAlreadyFavorited)
+
+            // Refresh button
+            Button {
+                haptic()
+                Task {
+                    await viewModel.loadArrivals()
+                }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isLoadingArrivals)
+            .rotationEffect(.degrees(viewModel.isLoadingArrivals ? 360 : 0))
+            .animation(
+                viewModel.isLoadingArrivals ?
+                    .linear(duration: 1).repeatForever(autoreverses: false) :
+                    .default,
+                value: viewModel.isLoadingArrivals
+            )
+        }
+    }
+
+    // MARK: - Route Details Title
+
+    private var routeDetailsTitle: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Route badge pill
+            HStack(spacing: 6) {
+                let routeID = viewModel.selectedRoute?.id ?? ""
+                let displayName = routeID.displayRouteName
+                let badgeColor = routeID.routeBadgeColor
+                let textColor = routeID.routeTextColor
+
+                Text(displayName)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(textColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(badgeColor)
+                    )
+
+                Text(routeLineName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+
+            // Destination title
+            Text("To \(shortDestination(selectedDirectionDestination))")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundColor(.white)
+                .lineLimit(2)
+
+            // Subtitle with stop name
+            if let stopName = viewModel.selectedStop?.name {
+                Text("via \(shortDestination(stopName))")
+                    .font(.system(size: 15))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+        }
+    }
+
+    // MARK: - Redesigned Direction Section
+
+    @ViewBuilder
+    private var redesignedDirectionSection: some View {
+        if viewModel.directions.count >= 2 {
+            let dir0 = viewModel.directions[0]
+            let dir1 = viewModel.directions[1]
+            let isDir0Selected = viewModel.selectedDirectionID == dir0.id
+
+            HStack(spacing: 0) {
+                // Direction 0
+                Button {
+                    haptic()
+                    viewModel.selectedDirectionID = dir0.id
+                    Task {
+                        await viewModel.selectDirection(dir0.id)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(dir0.id == viewModel.selectedDirectionID ? routeBadgeText : "")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(routeBadgeTextColor)
+                            .frame(width: dir0.id == viewModel.selectedDirectionID ? 24 : 0, height: 24)
+                            .background(
+                                Circle().fill(dir0.id == viewModel.selectedDirectionID ? routeAccentColor : .clear)
+                            )
+                            .opacity(dir0.id == viewModel.selectedDirectionID ? 1 : 0)
+
+                        Text("To \(shortDestination(dir0.destination))")
+                            .font(.system(size: 14, weight: isDir0Selected ? .semibold : .medium))
+                            .foregroundColor(isDir0Selected ? .white : .white.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+
+                // Swap icon
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.3))
+                    .frame(width: 30)
+
+                // Direction 1
+                Button {
+                    haptic()
+                    viewModel.selectedDirectionID = dir1.id
+                    Task {
+                        await viewModel.selectDirection(dir1.id)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("To \(shortDestination(dir1.destination))")
+                            .font(.system(size: 14, weight: !isDir0Selected ? .semibold : .medium))
+                            .foregroundColor(!isDir0Selected ? .white : .white.opacity(0.45))
+                            .lineLimit(1)
+
+                        Text(dir1.id == viewModel.selectedDirectionID ? routeBadgeText : "")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(routeBadgeTextColor)
+                            .frame(width: dir1.id == viewModel.selectedDirectionID ? 24 : 0, height: 24)
+                            .background(
+                                Circle().fill(dir1.id == viewModel.selectedDirectionID ? routeAccentColor : .clear)
+                            )
+                            .opacity(dir1.id == viewModel.selectedDirectionID ? 1 : 0)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(white: 0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color(white: 0.20), lineWidth: 1)
+                    )
+            )
+            .disabled(viewModel.isLoadingStops)
+        }
+    }
+
+    // MARK: - Redesigned Stop Selector
+
+    private var redesignedStopSelector: some View {
+        Menu {
+            ForEach(viewModel.stops) { stop in
+                Button(stop.name) {
+                    haptic()
+                    viewModel.selectedStopID = stop.id
+                    viewModel.saveWidgetSelection()
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(routeAccentColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.selectedStop?.name ?? "Select your stop")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Text(viewModel.selectedStop != nil ? "Tap to change stop" : "Choose where you will board")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(white: 0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color(white: 0.20), lineWidth: 1)
+                    )
+            )
+        }
+        .disabled(viewModel.selectedDirectionID == nil || viewModel.isLoadingStops || viewModel.stops.isEmpty)
+    }
+
+    // MARK: - Redesigned Results Section
+
+    @ViewBuilder
+    private var redesignedResultsSection: some View {
+        if viewModel.arrivals.isEmpty && !viewModel.isLoadingArrivals {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                // Section title
+                Text(upcomingTitle)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .blur(radius: isPickingPrediction ? 6 : 0)
+                    .allowsHitTesting(!isPickingPrediction)
+
+                // Arrival cards
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(Array(displayedArrivals.enumerated()), id: \.element.id) { index, arrival in
+                        Button {
+                            guard isPickingPrediction else { return }
+                            guard arrival.minutesAway != nil, index < viewModel.arrivals.count else {
+                                haptic()
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    isPickingPrediction = false
+                                }
+                                return
+                            }
+                            haptic()
+                            let trackedTime = arrival.arrivalTime ?? arrival.departureTime
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                selectedPredictionArrivalTime = trackedTime
+                                isPickingPrediction = false
+                            }
+                            viewModel.startLiveActivity(arrivalIndex: index)
+
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showIslandHint = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showIslandHint = false
+                                }
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                HStack(spacing: 4) {
+                                    Text(arrival.minutesAway.map { "\($0)" } ?? "--")
+                                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                                        .foregroundColor(arrival.minutesAway != nil ? .white : .white.opacity(0.3))
+
+                                    Text("min")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color(white: 0.12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(
+                                                    isSelectedArrival(arrival) ? routeAccentColor : Color(white: 0.20),
+                                                    lineWidth: isSelectedArrival(arrival) ? 2 : 1
+                                                )
+                                        )
+                                )
+                                .scaleEffect(isPickingPrediction && arrival.minutesAway != nil ? 1.05 : 1.0)
+
+                                // Arrival time
+                                Text(arrivalTimeText(for: arrival))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .lineLimit(1)
+
+                                // Stops away (bus only)
+                                if let stopsText = stopsAwayText(for: arrival.stopsAway) {
+                                    Text(stopsText)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.35))
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // "Pick an arrival" hint during selection mode
+                if isPickingPrediction {
+                    HStack {
+                        Text("Tap an arrival to show on Dynamic Island")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(routeAccentColor)
+
+                        Spacer()
+
+                        Button {
+                            haptic()
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                isPickingPrediction = false
+                            }
+                        } label: {
+                            Text("Cancel")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                // Inline hint after send-to-island animation
+                if showIslandHint {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.green)
+                        Text("Visible on Dynamic Island after exiting app")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isPickingPrediction)
+        }
+    }
+
+    // MARK: - Redesigned Stop Search Bar
+
+    private var redesignedStopSearchBar: some View {
+        Menu {
+            ForEach(viewModel.stops) { stop in
+                Button(stop.name) {
+                    haptic()
+                    viewModel.selectedStopID = stop.id
+                    viewModel.saveWidgetSelection()
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.white.opacity(0.35))
+
+                Text("Search for a \(viewModel.stopTitle.lowercased())")
+                    .font(.system(size: 15))
+                    .foregroundColor(.white.opacity(0.35))
+
+                Spacer()
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(white: 0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color(white: 0.20), lineWidth: 1)
+                    )
+            )
+        }
+        .disabled(viewModel.stops.isEmpty)
+    }
+
+    // MARK: - Redesigned Action Cards
+
+    @ViewBuilder
+    private func actionCard(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void,
+        disabled: Bool = false
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(iconColor)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(subtitle)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.25))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(white: 0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color(white: 0.20), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    private var redesignedActionCards: some View {
+        VStack(spacing: 10) {
+            // Show on Dynamic Island — original pill-preview button
+            if !viewModel.arrivals.isEmpty {
+                Button {
+                    haptic(.medium)
+                    if viewModel.currentActivity != nil {
+                        viewModel.stopLiveActivity()
+                        selectedPredictionArrivalTime = nil
+                    } else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            isPickingPrediction = true
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        // Realistic Dynamic Island pill shape preview
+                        ZStack {
+                            // Main pill background
+                            Capsule()
+                                .fill(.black)
+                                .frame(width: 95, height: 22)
+
+                            HStack {
+                                // Route badge on left
+                                let routeName = viewModel.selectedRoute?.id ?? "39"
+                                if routeName.isCommuterRail {
+                                    Image(systemName: "train.side.front.car")
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .foregroundColor(.purple)
+                                        .padding(.leading, 6)
+                                } else {
+                                    Text(routeName.displayRouteName)
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundColor(routeName.routeTextColor)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(routeName.routeBadgeColor)
+                                        )
+                                        .padding(.leading, 4)
+                                }
+
+                                Spacer()
+
+                                // Countdown on right
+                                if let minutesAway = viewModel.arrivals.first?.minutesAway {
+                                    HStack(spacing: 2) {
+                                        Text("\(minutesAway)")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.white)
+                                        Text("m")
+                                            .font(.system(size: 7, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.9))
+                                    }
+                                    .padding(.trailing, 6)
+                                }
+                            }
+                            .frame(width: 95)
+
+                            // Camera and Face ID sensor in middle
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(.black.opacity(0.95))
+                                    .frame(width: 3, height: 3)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(.white.opacity(0.1), lineWidth: 0.3)
+                                    )
+
+                                Circle()
+                                    .fill(
+                                        RadialGradient(
+                                            colors: [.gray.opacity(0.3), .black.opacity(0.8)],
+                                            center: .center,
+                                            startRadius: 0.5,
+                                            endRadius: 2.5
+                                        )
+                                    )
+                                    .frame(width: 4, height: 4)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(.white.opacity(0.15), lineWidth: 0.3)
+                                    )
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(viewModel.currentActivity != nil ? "Hide from Island" : "Show on Island")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+
+                            Text(viewModel.currentActivity != nil ? "Remove from screen" : "Live countdown on screen")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(0.5))
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: viewModel.currentActivity != nil ? "xmark.circle.fill" : "arrow.right.circle.fill")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(viewModel.currentActivity != nil ? .red : routeAccentColor)
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(white: 0.12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color(white: 0.20), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Add to Favorites
+            actionCard(
+                icon: isCurrentSelectionAlreadyFavorited ? "star.fill" : "star",
+                iconColor: .yellow,
+                title: "Add to Favorites",
+                subtitle: isCurrentSelectionAlreadyFavorited ? "Already in your favorites" : "Quick access to this route",
+                disabled: isCurrentSelectionAlreadyFavorited
+            ) {
+                haptic()
+                isShowingFavoritePicker = true
+            }
+
+            // Add to Home Screen Widgets
+            actionCard(
+                icon: "square.grid.2x2",
+                iconColor: routeAccentColor,
+                title: "Add to Home Screen Widgets",
+                subtitle: "Track arrivals from your Home Screen"
+            ) {
+                haptic()
+                isShowingWidgetAssignment = true
+            }
+        }
+    }
+
+    // MARK: - Route Accent Color
+
+    private var routeAccentColor: Color {
+        let routeID = (viewModel.selectedRoute?.id ?? "").uppercased()
+
+        // Bus — yellow
+        if routeID.allSatisfy({ $0.isNumber }) || routeID.hasPrefix("SL") || routeID.hasPrefix("CT") {
+            return Color(red: 255/255, green: 200/255, blue: 0/255)
+        }
+        if routeID.contains("RED") || routeID.contains("MATTAPAN") {
+            return Color(red: 218/255, green: 41/255, blue: 28/255)
+        }
+        if routeID.contains("ORANGE") {
+            return Color(red: 237/255, green: 139/255, blue: 0/255)
+        }
+        if routeID.contains("BLUE") {
+            return Color(red: 0/255, green: 115/255, blue: 207/255)
+        }
+        if routeID.contains("GREEN") {
+            return Color(red: 0/255, green: 132/255, blue: 61/255)
+        }
+        if routeID.hasPrefix("CR-") {
+            return .purple
+        }
+        return Color(red: 255/255, green: 200/255, blue: 0/255) // default bus yellow
+    }
+
+    private var routeLineName: String {
+        let routeID = (viewModel.selectedRoute?.id ?? "").uppercased()
+
+        if routeID.allSatisfy({ $0.isNumber }) || routeID.hasPrefix("SL") || routeID.hasPrefix("CT") {
+            return "Bus"
+        }
+        if routeID.contains("RED") { return "Red Line" }
+        if routeID.contains("MATTAPAN") { return "Mattapan Line" }
+        if routeID.contains("ORANGE") { return "Orange Line" }
+        if routeID.contains("BLUE") { return "Blue Line" }
+        if routeID.contains("GREEN") { return "Green Line" }
+        if routeID.hasPrefix("CR-") {
+            return viewModel.selectedRoute?.displayName ?? "Commuter Rail"
+        }
+        return viewModel.selectedRoute?.displayName ?? "Route"
+    }
+
+    private var routeBadgeText: String {
+        (viewModel.selectedRoute?.id ?? "").displayRouteName
+    }
+
+    private var routeBadgeTextColor: Color {
+        (viewModel.selectedRoute?.id ?? "").routeTextColor
+    }
+
+    private var upcomingTitle: String {
+        switch viewModel.selectedMode {
+        case .bus:
+            return "Upcoming Buses"
+        case .subway:
+            return "Upcoming Trains"
+        case .commuterRail:
+            return "Upcoming Trains"
+        }
     }
 
     // MARK: - Mode Cards
@@ -2618,6 +3343,386 @@ private extension String {
         }
         
         return self
+    }
+}
+
+// MARK: - Widget Assignment Sheet
+
+struct WidgetAssignmentSheet: View {
+    @ObservedObject var viewModel: ArrivalsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedSlot: WidgetSlot = .wide
+    @State private var mediumWidgetFavoriteIndex: Int? = nil
+    @State private var smallWidget1FavoriteIndex: Int? = nil
+    @State private var smallWidget2FavoriteIndex: Int? = nil
+
+    // Post-assignment onboarding state
+    @State private var showOnboarding = false
+    @State private var showSuccessCheck = false
+    @State private var successCheckScale: CGFloat = 0
+    @State private var drawCheckmark = false
+    @State private var assignmentSlideOut = false
+
+    private enum WidgetSlot: String, CaseIterable, Identifiable {
+        case wide = "Wide Widget"
+        case small1 = "Small Widget 1"
+        case small2 = "Small Widget 2"
+
+        var id: String { rawValue }
+
+        var screenshotAsset: String {
+            switch self {
+            case .wide: return "WidgetWide1"
+            case .small1: return "WidgetSmall1"
+            case .small2: return "WidgetSmall2"
+            }
+        }
+
+        var userDefaultsKey: String {
+            switch self {
+            case .wide: return "mediumWidgetFavoriteIndex"
+            case .small1: return "smallWidget1FavoriteIndex"
+            case .small2: return "smallWidget2FavoriteIndex"
+            }
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if !showOnboarding {
+                assignmentView
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if showOnboarding {
+                onboardingView
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            loadWidgetAssignments()
+        }
+    }
+
+    // MARK: - Assignment View
+
+    private var assignmentView: some View {
+        VStack(spacing: 0) {
+            // Header with close button
+            ZStack {
+                HStack {
+                    Button {
+                        haptic()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.6))
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(Color(white: 0.20)))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+
+                VStack(spacing: 4) {
+                    Text("Add to Home Screen Widget")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Text("Choose where you want this route to appear.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.45))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 20)
+
+            // Widget cards
+            VStack(spacing: 12) {
+                ForEach(WidgetSlot.allCases) { slot in
+                    widgetCard(for: slot)
+                }
+            }
+            .padding(.horizontal, 20)
+
+            Spacer(minLength: 20)
+
+            // Assign button
+            Button {
+                haptic(.medium)
+                assignToSelectedSlot()
+            } label: {
+                Text("Assign to \(selectedSlot.rawValue)")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.blue)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+
+            // Cancel
+            Button {
+                haptic()
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 24)
+        }
+    }
+
+    // MARK: - Onboarding View
+
+    private var onboardingView: some View {
+        VStack(spacing: 0) {
+            // Close button
+            HStack {
+                Button {
+                    haptic()
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color(white: 0.20)))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+
+            // Success animation
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.15))
+                        .frame(width: 52, height: 52)
+
+                    CheckmarkShape()
+                        .trim(from: 0, to: drawCheckmark ? 1 : 0)
+                        .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                        .frame(width: 22, height: 22)
+                }
+                .scaleEffect(successCheckScale)
+
+                Text("Widget Assigned")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text("Saved to Favorites and assigned successfully.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .padding(.top, 16)
+            .padding(.bottom, 0)
+
+            // Onboarding guide image — edge to edge, no side padding
+            Image("WidgetOnboarding")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(.top, 10)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Widget Card
+
+    private func widgetCard(for slot: WidgetSlot) -> some View {
+        let isSelected = selectedSlot == slot
+
+        return Button {
+            haptic()
+            withAnimation(.easeInOut(duration: 0.15)) {
+                selectedSlot = slot
+            }
+        } label: {
+            HStack(spacing: 14) {
+                // Widget name and current assignment
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(slot.rawValue)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(currentAssignmentLabel(for: slot))
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.35))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                Spacer()
+
+                // Widget preview image — fixed height for all tiles
+                Image(slot.screenshotAsset)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(white: 0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                isSelected ? Color.blue : Color(white: 0.20),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Current Assignment Label
+
+    private func currentAssignmentLabel(for slot: WidgetSlot) -> String {
+        let index: Int?
+        switch slot {
+        case .wide: index = mediumWidgetFavoriteIndex
+        case .small1: index = smallWidget1FavoriteIndex
+        case .small2: index = smallWidget2FavoriteIndex
+        }
+
+        guard let idx = index,
+              viewModel.quickFavorites.indices.contains(idx),
+              let favorite = viewModel.quickFavorites[idx] else {
+            return "Currently: None"
+        }
+
+        return "Currently: \(favorite.routeName) · \(favorite.directionDestination)"
+    }
+
+    // MARK: - Assignment Logic
+
+    private func assignToSelectedSlot() {
+        guard let favoriteIndex = resolveOrCreateFavoriteIndex() else { return }
+
+        switch selectedSlot {
+        case .wide:
+            mediumWidgetFavoriteIndex = favoriteIndex
+        case .small1:
+            smallWidget1FavoriteIndex = favoriteIndex
+        case .small2:
+            smallWidget2FavoriteIndex = favoriteIndex
+        }
+
+        saveWidgetAssignments()
+
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+
+        // Transition to onboarding
+        withAnimation(.easeInOut(duration: 0.35)) {
+            showOnboarding = true
+        }
+
+        // Animate success checkmark after transition
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                successCheckScale = 1.0
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                drawCheckmark = true
+            }
+        }
+    }
+
+    private func resolveOrCreateFavoriteIndex() -> Int? {
+        guard let routeID = viewModel.selectedRoute?.id,
+              let directionID = viewModel.selectedDirectionID,
+              let stopID = viewModel.selectedStopID else {
+            return nil
+        }
+
+        // Check if current route+direction+stop is already a favorite
+        for (index, favorite) in viewModel.quickFavorites.enumerated() {
+            if let fav = favorite,
+               fav.routeID == routeID,
+               fav.directionID == directionID,
+               fav.stopID == stopID {
+                return index
+            }
+        }
+
+        // Use first empty slot if available
+        if let emptyIndex = viewModel.quickFavorites.firstIndex(where: { $0 == nil }) {
+            viewModel.saveFavorite(at: emptyIndex)
+            return emptyIndex
+        }
+
+        // Replace last slot if all full
+        viewModel.saveFavorite(at: 3)
+        return 3
+    }
+
+    // MARK: - Persistence
+
+    private func loadWidgetAssignments() {
+        guard let defaults = UserDefaults(suiteName: "group.Widgets.MBTA") else { return }
+        mediumWidgetFavoriteIndex = defaults.object(forKey: "mediumWidgetFavoriteIndex") as? Int
+        smallWidget1FavoriteIndex = defaults.object(forKey: "smallWidget1FavoriteIndex") as? Int
+        smallWidget2FavoriteIndex = defaults.object(forKey: "smallWidget2FavoriteIndex") as? Int
+    }
+
+    private func saveWidgetAssignments() {
+        guard let defaults = UserDefaults(suiteName: "group.Widgets.MBTA") else { return }
+
+        if let index = mediumWidgetFavoriteIndex {
+            defaults.set(index, forKey: "mediumWidgetFavoriteIndex")
+        } else {
+            defaults.removeObject(forKey: "mediumWidgetFavoriteIndex")
+        }
+        if let index = smallWidget1FavoriteIndex {
+            defaults.set(index, forKey: "smallWidget1FavoriteIndex")
+        } else {
+            defaults.removeObject(forKey: "smallWidget1FavoriteIndex")
+        }
+        if let index = smallWidget2FavoriteIndex {
+            defaults.set(index, forKey: "smallWidget2FavoriteIndex")
+        } else {
+            defaults.removeObject(forKey: "smallWidget2FavoriteIndex")
+        }
+    }
+
+    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+}
+
+// MARK: - Checkmark Shape
+
+private struct CheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX * 0.8, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 

@@ -159,8 +159,8 @@ struct GreenLineBranchesView: View {
         Task {
             await viewModel.loadRoute()
         }
-        // Dismiss back to root (Search page) by dismissing twice
-        dismiss()
+        // Don't dismiss here — ContentView's onChange(of: viewModel.directions)
+        // will dismiss the entire SubwayLines → GreenBranches navigation stack at once
     }
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {

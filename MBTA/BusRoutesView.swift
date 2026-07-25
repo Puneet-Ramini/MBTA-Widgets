@@ -62,10 +62,10 @@ struct BusRoutesView: View {
 
     private var headerSection: some View {
         HStack(alignment: .center, spacing: 16) {
-            Image("MBTABus")
+            Image("MBTABusHeader")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 140)
+                .frame(width: 120, height: 120)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Bus")
