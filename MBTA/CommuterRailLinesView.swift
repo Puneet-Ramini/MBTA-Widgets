@@ -67,10 +67,10 @@ struct CommuterRailLinesView: View {
 
     private var headerSection: some View {
         HStack(alignment: .center, spacing: 16) {
-            Image("MBTACommuterRail")
+            Image("MBTACommuterRailHeader")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 110)
+                .frame(width: 120, height: 120)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Commuter Rail")
