@@ -67,6 +67,7 @@ struct ContentView: View {
     @State private var isShowingBusRoutes = false
     @State private var isShowingSubwayLines = false
     @State private var isShowingCommuterRailLines = false
+    @State private var isShowingRouteAlerts = false
     @Environment(\.scenePhase) private var scenePhase
 
     private var showRouteDetails: Bool {
@@ -145,7 +146,7 @@ struct ContentView: View {
                     }
                 }
             } message: {
-                Text("Choose which quick button should store this bus, direction, and stop.")
+                Text("Choose which quick button should store this route, direction, and stop.")
             }
             .navigationDestination(isPresented: $isShowingWidgetCustomization) {
                 WidgetCustomizationView(viewModel: viewModel)
@@ -167,6 +168,38 @@ struct ContentView: View {
                     .presentationDetents([.large])
                     .presentationBackground(Color.black)
                     .presentationCornerRadius(24)
+            }
+            .sheet(isPresented: $isShowingRouteAlerts) {
+                NavigationStack {
+                    List {
+                        if routeAlerts.isEmpty {
+                            Text("No active alerts for this route.")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(routeAlerts) { alert in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(alert.header)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    if !alert.description.isEmpty {
+                                        Text(alert.description)
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                    .navigationTitle("Route Alerts")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isShowingRouteAlerts = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationBackground(Color(white: 0.08))
             }
             .onChange(of: viewModel.directions) { _, newDirections in
                 // When directions load (route is ready), dismiss any mode selection views
@@ -352,28 +385,28 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .disabled(isCurrentSelectionAlreadyFavorited)
 
-            // Refresh button
+            // Alerts button
             Button {
                 haptic()
-                Task {
-                    await viewModel.loadArrivals()
-                }
+                isShowingRouteAlerts = true
             } label: {
-                Image(systemName: "arrow.clockwise")
+                Image(systemName: "bell")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(Color.white.opacity(0.1)))
+                    .overlay(alignment: .topTrailing) {
+                        if routeAlertCount > 0 {
+                            Text("\(routeAlertCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 16, height: 16)
+                                .background(Circle().fill(.red))
+                                .offset(x: 4, y: -4)
+                        }
+                    }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isLoadingArrivals)
-            .rotationEffect(.degrees(viewModel.isLoadingArrivals ? 360 : 0))
-            .animation(
-                viewModel.isLoadingArrivals ?
-                    .linear(duration: 1).repeatForever(autoreverses: false) :
-                    .default,
-                value: viewModel.isLoadingArrivals
-            )
         }
     }
 
@@ -384,7 +417,9 @@ struct ContentView: View {
             // Route badge pill
             HStack(spacing: 6) {
                 let routeID = viewModel.selectedRoute?.id ?? ""
-                let displayName = routeID.displayRouteName
+                let displayName = routeID.isBusRoute
+                    ? (viewModel.selectedRoute?.displayName ?? routeID)
+                    : routeID.displayRouteName
                 let badgeColor = routeID.routeBadgeColor
                 let textColor = routeID.routeTextColor
 
@@ -457,10 +492,20 @@ struct ContentView: View {
                 .buttonStyle(.plain)
 
                 // Swap icon
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.3))
-                    .frame(width: 30)
+                Button {
+                    haptic()
+                    let newDir = isDir0Selected ? dir1.id : dir0.id
+                    viewModel.selectedDirectionID = newDir
+                    Task {
+                        await viewModel.selectDirection(newDir)
+                    }
+                } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.3))
+                        .frame(width: 30)
+                }
+                .buttonStyle(.plain)
 
                 // Direction 1
                 Button {
@@ -558,12 +603,28 @@ struct ContentView: View {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                // Section title
-                Text(upcomingTitle)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-                    .blur(radius: isPickingPrediction ? 6 : 0)
-                    .allowsHitTesting(!isPickingPrediction)
+                // Section title with refresh
+                HStack {
+                    Text(upcomingTitle)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Spacer()
+
+                    Button {
+                        haptic()
+                        Task {
+                            await viewModel.loadArrivals()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .blur(radius: isPickingPrediction ? 6 : 0)
+                .allowsHitTesting(!isPickingPrediction)
 
                 // Arrival cards
                 HStack(alignment: .top, spacing: 10) {
@@ -789,21 +850,24 @@ struct ContentView: View {
 
                             HStack {
                                 // Route badge on left
-                                let routeName = viewModel.selectedRoute?.id ?? "39"
-                                if routeName.isCommuterRail {
+                                let routeID = viewModel.selectedRoute?.id ?? "39"
+                                let badgeText = routeID.isBusRoute
+                                    ? (viewModel.selectedRoute?.displayName ?? routeID)
+                                    : routeID.displayRouteName
+                                if routeID.isCommuterRail {
                                     Image(systemName: "train.side.front.car")
                                         .font(.system(size: 8, weight: .semibold))
                                         .foregroundColor(.purple)
                                         .padding(.leading, 6)
                                 } else {
-                                    Text(routeName.displayRouteName)
+                                    Text(badgeText)
                                         .font(.system(size: 7, weight: .bold))
-                                        .foregroundColor(routeName.routeTextColor)
+                                        .foregroundColor(routeID.routeTextColor)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 3)
                                         .background(
                                             RoundedRectangle(cornerRadius: 4)
-                                                .fill(routeName.routeBadgeColor)
+                                                .fill(routeID.routeBadgeColor)
                                         )
                                         .padding(.leading, 4)
                                 }
@@ -952,11 +1016,29 @@ struct ContentView: View {
     }
 
     private var routeBadgeText: String {
-        (viewModel.selectedRoute?.id ?? "").displayRouteName
+        let routeID = viewModel.selectedRoute?.id ?? ""
+        if routeID.isBusRoute {
+            return viewModel.selectedRoute?.displayName ?? routeID
+        }
+        return routeID.displayRouteName
     }
 
     private var routeBadgeTextColor: Color {
         (viewModel.selectedRoute?.id ?? "").routeTextColor
+    }
+
+    private var routeAlertCount: Int {
+        guard let routeID = viewModel.selectedRoute?.id else { return 0 }
+        return viewModel.allAlerts.filter { alert in
+            alert.routeIDs.contains(routeID)
+        }.count
+    }
+
+    private var routeAlerts: [MBTAAlert] {
+        guard let routeID = viewModel.selectedRoute?.id else { return [] }
+        return viewModel.allAlerts.filter { alert in
+            alert.routeIDs.contains(routeID)
+        }
     }
 
     private var upcomingTitle: String {
@@ -1131,6 +1213,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            .contentShape(Rectangle())
 
             if !isLast {
                 Rectangle()
@@ -1139,36 +1222,19 @@ struct ContentView: View {
                     .padding(.leading, 58)
             }
         }
+        .contentShape(Rectangle())
     }
 
     private func recentBadge(for recent: RecentSearch) -> some View {
-        let route = recent.routeID.uppercased()
-        let color: Color = {
-            if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
-                return Color(red: 255/255, green: 200/255, blue: 0/255)
-            }
-            if route.contains("RED") || route.contains("MATTAPAN") { return Color(red: 218/255, green: 41/255, blue: 28/255) }
-            if route.contains("ORANGE") { return Color(red: 237/255, green: 139/255, blue: 0/255) }
-            if route.contains("BLUE") { return Color(red: 0/255, green: 115/255, blue: 207/255) }
-            if route.contains("GREEN") { return Color(red: 0/255, green: 132/255, blue: 61/255) }
-            if route.starts(with: "CR-") { return .purple }
-            return Color(red: 255/255, green: 200/255, blue: 0/255)
-        }()
-        let textColor: Color = (route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT")) ? .black : .white
+        let routeID = recent.routeID
+        let color: Color = routeID.routeBadgeColor
+        let textColor: Color = routeID.routeTextColor
 
         let badgeText: String = {
-            if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+            if routeID.isBusRoute {
                 return recent.routeName
             }
-            if route.contains("ORANGE") { return "OL" }
-            if route.contains("RED") || route.contains("MATTAPAN") { return "RL" }
-            if route.contains("BLUE") { return "BL" }
-            if route.contains("GREEN-B") { return "B" }
-            if route.contains("GREEN-C") { return "C" }
-            if route.contains("GREEN-D") { return "D" }
-            if route.contains("GREEN-E") { return "E" }
-            if route.starts(with: "CR-") { return "CR" }
-            return recent.routeName
+            return routeID.displayRouteName
         }()
 
         return Text(badgeText)
@@ -1179,7 +1245,6 @@ struct ContentView: View {
     }
 
     private func recentPrimaryText(_ recent: RecentSearch) -> String {
-        let route = recent.routeID.uppercased()
         // For subway/rail, show the destination; for bus, show "Harvard Square" etc.
         if !recent.directionDestination.isEmpty {
             return recent.directionDestination
@@ -1602,310 +1667,6 @@ struct ContentView: View {
             Text(message)
                 .font(.caption)
                 .foregroundColor(.red)
-        }
-    }
-
-    @ViewBuilder
-    private var resultsSection: some View {
-        if viewModel.arrivals.isEmpty && !viewModel.isLoadingArrivals {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: modeIconForResults)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.blue)
-
-                    Text(resultsTitle)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.primary)
-                    
-                    Spacer()
-                    
-                    Button {
-                        haptic()
-                        isShowingFavoritePicker = true
-                    } label: {
-                        Image(systemName: isCurrentSelectionAlreadyFavorited ? "star.fill" : "star")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.orange)
-                            .padding(8)
-                            .background {
-                                Circle()
-                                    .fill(Color(.secondarySystemGroupedBackground))
-                                    .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
-                            }
-                    }
-                    .disabled(isCurrentSelectionAlreadyFavorited)
-                    
-                    Button {
-                        haptic()
-                        Task {
-                            await viewModel.loadArrivals()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.blue)
-                            .padding(8)
-                            .background {
-                                Circle()
-                                    .fill(Color(.secondarySystemGroupedBackground))
-                                    .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
-                            }
-                    }
-                    .disabled(viewModel.isLoadingArrivals)
-                    .rotationEffect(.degrees(viewModel.isLoadingArrivals ? 360 : 0))
-                    .animation(
-                        viewModel.isLoadingArrivals ? 
-                            .linear(duration: 1).repeatForever(autoreverses: false) : 
-                            .default,
-                        value: viewModel.isLoadingArrivals
-                    )
-                }
-                .blur(radius: isPickingPrediction ? 6 : 0)
-                .allowsHitTesting(!isPickingPrediction)
-
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(Array(displayedArrivals.enumerated()), id: \.element.id) { index, arrival in
-                        Button {
-                            guard isPickingPrediction else { return }
-                            guard arrival.minutesAway != nil, index < viewModel.arrivals.count else {
-                                haptic()
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    isPickingPrediction = false
-                                }
-                                return
-                            }
-                            haptic()
-                            let trackedTime = arrival.arrivalTime ?? arrival.departureTime
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                selectedPredictionArrivalTime = trackedTime
-                                isPickingPrediction = false
-                            }
-                            viewModel.startLiveActivity(arrivalIndex: index)
-                            
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showIslandHint = true
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    showIslandHint = false
-                                }
-                            }
-                        } label: {
-                            VStack(spacing: 6) {
-                                VStack(spacing: 4) {
-                                    Text(arrival.minutesAway.map { "\($0)" } ?? "--")
-                                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                                        .foregroundStyle(
-                                            LinearGradient(
-                                                colors: arrival.minutesAway != nil ? [.blue, .blue.opacity(0.8)] : [.gray, .gray.opacity(0.6)],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                    
-                                    Text("min")
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(.secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(.secondarySystemGroupedBackground))
-                                        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                                }
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(.black, lineWidth: isSelectedArrival(arrival) ? 2 : 0)
-                                )
-                                .scaleEffect(isPickingPrediction && arrival.minutesAway != nil ? 1.08 : 1.0)
-
-                                VStack(spacing: 2) {
-                                    if let stopsText = stopsAwayText(for: arrival.stopsAway) {
-                                        Text(stopsText)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(1)
-                                    } else {
-                                        Text(" ")
-                                            .font(.system(size: 11, weight: .medium))
-                                    }
-
-                                    Text(arrivalTimeText(for: arrival))
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                // "Pick an arrival" hint during selection mode
-                if isPickingPrediction {
-                    HStack {
-                        Text("Tap an arrival to show on Dynamic Island")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.blue)
-                        
-                        Spacer()
-                        
-                        Button {
-                            haptic()
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                isPickingPrediction = false
-                            }
-                        } label: {
-                            Text("Cancel")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                
-                // Inline hint after send-to-island animation
-                if showIslandHint {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.green)
-                        Text("Visible on Dynamic Island after exiting app")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                
-                if !viewModel.arrivals.isEmpty {
-                    Button {
-                        haptic(.medium)
-                        if viewModel.currentActivity != nil {
-                            viewModel.stopLiveActivity()
-                            selectedPredictionArrivalTime = nil
-                        } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                isPickingPrediction = true
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            // Realistic Dynamic Island pill shape preview
-                            ZStack {
-                                // Main pill background
-                                Capsule()
-                                    .fill(.black)
-                                    .frame(width: 95, height: 22)
-                                
-                                HStack {
-                                    // Route badge on left - now uses proper route colors
-                                    let routeName = viewModel.selectedRoute?.id ?? "39"
-                                    if routeName.isCommuterRail {
-                                        Image(systemName: "train.side.front.car")
-                                            .font(.system(size: 8, weight: .semibold))
-                                            .foregroundColor(.purple)
-                                            .padding(.leading, 6)
-                                    } else {
-                                        Text(routeName.displayRouteName)
-                                            .font(.system(size: 7, weight: .bold))
-                                            .foregroundColor(routeName.routeTextColor)
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 3)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 4)
-                                                    .fill(routeName.routeBadgeColor)
-                                            )
-                                            .padding(.leading, 4)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    // Countdown on right
-                                    if let minutesAway = viewModel.arrivals.first?.minutesAway {
-                                        HStack(spacing: 2) {
-                                            Text("\(minutesAway)")
-                                                .font(.system(size: 8, weight: .bold))
-                                                .foregroundColor(.white)
-                                            Text("m")
-                                                .font(.system(size: 7, weight: .semibold))
-                                                .foregroundColor(.white.opacity(0.9))
-                                        }
-                                        .padding(.trailing, 6)
-                                    }
-                                }
-                                .frame(width: 95)
-                                
-                                // Camera and Face ID sensor in middle
-                                HStack(spacing: 6) {
-                                    // Face ID sensor (left)
-                                    Circle()
-                                        .fill(.black.opacity(0.95))
-                                        .frame(width: 3, height: 3)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(.white.opacity(0.1), lineWidth: 0.3)
-                                        )
-                                    
-                                    // Camera lens (right, slightly larger)
-                                    Circle()
-                                        .fill(
-                                            RadialGradient(
-                                                colors: [.gray.opacity(0.3), .black.opacity(0.8)],
-                                                center: .center,
-                                                startRadius: 0.5,
-                                                endRadius: 2.5
-                                            )
-                                        )
-                                        .frame(width: 4, height: 4)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(.white.opacity(0.15), lineWidth: 0.3)
-                                        )
-                                }
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(viewModel.currentActivity != nil ? "Hide from Island" : "Show on Island")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(.primary)
-                                
-                                Text(viewModel.currentActivity != nil ? "Remove from screen" : "Live countdown on screen")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: viewModel.currentActivity != nil ? "xmark.circle.fill" : "arrow.right.circle.fill")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(viewModel.currentActivity != nil ? .red : .blue)
-                        }
-                        .padding(14)
-                        .background {
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(viewModel.currentActivity != nil
-                                      ? Color(.secondarySystemGroupedBackground)
-                                      : Color.blue.opacity(0.1))
-                                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
-                        }
-                        .overlay {
-                            if viewModel.currentActivity == nil {
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                            }
-                        }
-                    }
-                    .blur(radius: isPickingPrediction ? 6 : 0)
-                    .allowsHitTesting(!isPickingPrediction)
-                }
-            }
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isPickingPrediction)
         }
     }
 
@@ -3278,11 +3039,19 @@ struct ZoomOverlay: View {
 
 // MARK: - String Extensions for Route Colors
 private extension String {
+    var isBusRoute: Bool {
+        let route = self.uppercased()
+        return route.allSatisfy({ $0.isNumber })
+            || route.first?.isNumber == true
+            || route.starts(with: "SL")
+            || route.starts(with: "CT")
+    }
+
     var routeBadgeColor: Color {
         let route = self.uppercased()
         
         // Bus - Bright amber/gold for visibility on black pill
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.isBusRoute {
             return Color(red: 255/255, green: 200/255, blue: 0/255)
         }
         
@@ -3306,7 +3075,7 @@ private extension String {
         let route = self.uppercased()
         
         // Bus routes - black text on yellow
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.isBusRoute {
             return .black
         }
         

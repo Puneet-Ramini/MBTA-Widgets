@@ -30,11 +30,19 @@ private enum WidgetTransportMode: String {
 }
 
 private extension String {
+    var isBusRoute: Bool {
+        let route = self.uppercased()
+        return route.allSatisfy({ $0.isNumber })
+            || route.first?.isNumber == true
+            || route.starts(with: "SL")
+            || route.starts(with: "CT")
+    }
+
     var routeBadgeColor: Color {
         let route = self.uppercased()
         
         // Bus - Yellow
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.isBusRoute {
             return .yellow
         }
         
@@ -60,7 +68,7 @@ private extension String {
         let route = self.uppercased()
         
         // Bus routes - black text on yellow
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.isBusRoute {
             return .black
         }
         
@@ -113,9 +121,13 @@ struct MBTAWidgetEntry: TimelineEntry {
     let predictions: [WidgetArrivalDisplay]
     let message: String?
 
-    /// Use routeID for badge display (has "CR-" prefix for commuter rail), fall back to routeName
+    /// For badge display: buses show routeName (friendly name like "SL1"),
+    /// others use routeID (has "CR-" prefix for commuter rail detection).
     var badgeKey: String {
-        routeID ?? routeName
+        guard let routeID else { return routeName }
+        // Bus routes: prefer routeName for display (routeID can be cryptic, e.g. "741" for SL1)
+        if routeID.isBusRoute { return routeName }
+        return routeID
     }
 }
 
@@ -123,6 +135,7 @@ struct WidgetArrivalDisplay: Hashable {
     let arrivalDate: Date? // Store actual arrival date instead of text
     let minutesText: String // Keep for backward compatibility with previews
     let stopsAwayText: String
+    var arrivalTimeText: String = "" // e.g. "1:50 PM"
     
     // Helper to calculate current minutes
     func minutesUntilArrival(from currentDate: Date) -> Int {
@@ -215,16 +228,12 @@ struct MBTAWidgetProvider: TimelineProvider {
         }
         
         let predictions = state.arrivals.map { arrival in
-            let subtitle: String
-            if state.mode.showsStopsAway {
-                subtitle = arrival.stopsAwayText
-            } else {
-                subtitle = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
-            }
+            let timeText = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
             return WidgetArrivalDisplay(
                 arrivalDate: arrival.arrivalDate,
                 minutesText: formatMinutes(arrival.arrivalDate),
-                stopsAwayText: subtitle
+                stopsAwayText: state.mode.showsStopsAway ? arrival.stopsAwayText : "",
+                arrivalTimeText: timeText
             )
         }
         
@@ -398,16 +407,12 @@ struct MBTAWidgetProvider: TimelineProvider {
             stopName: state.stopName,
             predictions: state.arrivals.prefix(3).map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
-                let subtitle: String
-                if state.mode.showsStopsAway {
-                    subtitle = arrival.stopsAwayText
-                } else {
-                    subtitle = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
-                }
+                let timeText = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
                     minutesText: minutes < 1 ? "Now" : "\(minutes) min",
-                    stopsAwayText: subtitle
+                    stopsAwayText: state.mode.showsStopsAway ? arrival.stopsAwayText : "",
+                    arrivalTimeText: timeText
                 )
             },
             message: state.message
@@ -422,10 +427,12 @@ struct MBTAWidgetProvider: TimelineProvider {
             .prefix(3)
             .map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(date) / 60), 0)
+                let timeText = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
                     minutesText: minutes < 1 ? "Now" : "\(minutes) min",
-                    stopsAwayText: mode.showsStopsAway ? arrival.stopsAwayText : ""
+                    stopsAwayText: mode.showsStopsAway ? arrival.stopsAwayText : "",
+                    arrivalTimeText: timeText
                 )
             }
     }
@@ -522,15 +529,15 @@ struct MBTAWidgetEntryView: View {
                                 .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                                 .clipShape(Capsule())
 
-                            if !prediction.stopsAwayText.isEmpty {
-                                Text(prediction.stopsAwayText)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            } else {
-                                Text(" ")
-                                    .font(.caption2)
-                            }
+                            Text(prediction.arrivalTimeText.isEmpty ? " " : prediction.arrivalTimeText)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                            
+                            Text(prediction.stopsAwayText.isEmpty ? " " : prediction.stopsAwayText)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .top)
                     }
@@ -582,7 +589,7 @@ struct MBTAWidgetEntryView: View {
         }
         items.append(URLQueryItem(name: "stop", value: entry.stopName))
         components.queryItems = items
-        return components.url!
+        return components.url ?? URL(string: "mbta-widget://open")!
     }
 }
 
@@ -665,7 +672,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 directionID: state.directionID,
                 directionLine: state.directionLine,
                 stopID: state.stopID,
-                stopName: "",
+                stopName: state.stopName,
                 predictions: [],
                 message: message
             )
@@ -686,7 +693,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
             directionID: state.directionID,
             directionLine: state.directionLine,
             stopID: state.stopID,
-            stopName: "",
+            stopName: state.stopName,
             predictions: Array(predictions),
             message: nil
         )
@@ -782,7 +789,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 directionID: favorite.directionID,
                 directionLine: directionLine,
                 stopID: favorite.stopID,
-                stopName: "",
+                stopName: favorite.stopName,
                 arrivals: Array(arrivals.prefix(2)),
                 message: arrivals.isEmpty ? "No upcoming arrivals." : nil
             )
@@ -794,7 +801,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 directionID: favorite.directionID,
                 directionLine: directionLine,
                 stopID: favorite.stopID,
-                stopName: "",
+                stopName: favorite.stopName,
                 arrivals: [],
                 message: "Could not load times."
             )
@@ -823,7 +830,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
             directionID: state.directionID,
             directionLine: state.directionLine,
             stopID: state.stopID,
-            stopName: "",
+            stopName: state.stopName,
             predictions: state.arrivals.prefix(2).map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
                 return WidgetArrivalDisplay(
@@ -857,14 +864,14 @@ struct SmallFavoriteWidgetView: View {
     var entry: MBTAWidgetEntry
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .top) {
                 // Route badge
                 Text(entry.badgeKey.displayRouteName)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundColor(entry.badgeKey.routeTextColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
                     .background(entry.badgeKey.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 
@@ -877,7 +884,7 @@ struct SmallFavoriteWidgetView: View {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(.white)
-                                .frame(width: 24, height: 24)
+                                .frame(width: 22, height: 22)
                                 .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                                 .clipShape(Circle())
                             Text(entry.date, style: .time)
@@ -901,10 +908,18 @@ struct SmallFavoriteWidgetView: View {
             // Direction
             Text(entry.directionLine)
                 .font(.system(size: 11, weight: .semibold))
-                .lineLimit(2)
+                .lineLimit(1)
                 .foregroundColor(.primary)
             
-            Spacer(minLength: 2)
+            // Stop name
+            if !entry.stopName.isEmpty {
+                Text(entry.stopName)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            
+            Spacer(minLength: 1)
             
             // Arrival times
             if let message = entry.message {
@@ -919,7 +934,7 @@ struct SmallFavoriteWidgetView: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 5)
                             .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                             .clipShape(Capsule())
                     }
@@ -930,7 +945,7 @@ struct SmallFavoriteWidgetView: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white.opacity(0.85))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 5)
                             .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
                             .clipShape(Capsule())
                     }
@@ -960,7 +975,7 @@ struct SmallFavoriteWidgetView: View {
         }
         items.append(URLQueryItem(name: "stop", value: entry.stopName))
         components.queryItems = items
-        return components.url!
+        return components.url ?? URL(string: "mbta-widget://open")!
     }
 }
 
@@ -1008,17 +1023,24 @@ struct MBTAWidgetBundle: WidgetBundle {
 #if canImport(ActivityKit)
 @available(iOS 16.2, *)
 struct BusArrivalLiveActivity: Widget {
+    /// Badge key for Live Activity: buses show routeName, others use routeID
+    private static func badgeKey(for attributes: BusArrivalAttributes) -> String {
+        if attributes.routeID.isBusRoute { return attributes.routeName }
+        return attributes.routeID
+    }
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: BusArrivalAttributes.self) { context in
             // Lock Screen & Banner UI
+            let badge = Self.badgeKey(for: context.attributes)
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Text(context.attributes.routeID.displayRouteName)
+                    Text(badge.displayRouteName)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(context.attributes.routeID.routeTextColor)
+                        .foregroundColor(badge.routeTextColor)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(context.attributes.routeID.routeBadgeColor)
+                        .background(badge.routeBadgeColor)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     
                     VStack(alignment: .leading, spacing: 2) {
@@ -1047,15 +1069,16 @@ struct BusArrivalLiveActivity: Widget {
             .padding(.vertical, 12)
             .widgetURL(Self.liveActivityDeepLink(attributes: context.attributes))
         } dynamicIsland: { context in
-            DynamicIsland {
+            let badge = Self.badgeKey(for: context.attributes)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
-                        Text(context.attributes.routeID.displayRouteName)
+                        Text(badge.displayRouteName)
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(context.attributes.routeID.routeTextColor)
+                            .foregroundColor(badge.routeTextColor)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(context.attributes.routeID.routeBadgeColor)
+                            .background(badge.routeBadgeColor)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         
                         VStack(alignment: .leading, spacing: 2) {
@@ -1081,12 +1104,12 @@ struct BusArrivalLiveActivity: Widget {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             } compactLeading: {
-                Text(context.attributes.routeID.displayRouteName)
+                Text(badge.displayRouteName)
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(context.attributes.routeID.routeTextColor)
+                    .foregroundColor(badge.routeTextColor)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .background(context.attributes.routeID.routeBadgeColor)
+                    .background(badge.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } compactTrailing: {
                 Text(context.state.minutesText)
@@ -1114,7 +1137,7 @@ struct BusArrivalLiveActivity: Widget {
             items.append(URLQueryItem(name: "directionID", value: String(directionID)))
         }
         components.queryItems = items
-        return components.url!
+        return components.url ?? URL(string: "mbta-widget://open")!
     }
 }
 #endif
@@ -1133,9 +1156,9 @@ struct BusArrivalLiveActivity: Widget {
         stopID: nil,
         stopName: "Huntington Ave @ Perkins St",
         predictions: [
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(6*60), minutesText: "6 min", stopsAwayText: "2 stops away"),
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(15*60), minutesText: "15 min", stopsAwayText: "5 stops away"),
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(22*60), minutesText: "22 min", stopsAwayText: "8 stops away")
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(6*60), minutesText: "6 min", stopsAwayText: "2 stops away", arrivalTimeText: "1:36 PM"),
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(15*60), minutesText: "15 min", stopsAwayText: "5 stops away", arrivalTimeText: "1:45 PM"),
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(22*60), minutesText: "22 min", stopsAwayText: "8 stops away", arrivalTimeText: "1:52 PM")
         ],
         message: nil
     )
@@ -1149,9 +1172,9 @@ struct BusArrivalLiveActivity: Widget {
         stopID: nil,
         stopName: "Huntington Ave @ Perkins St",
         predictions: [
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: "2 stops away"),
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(14*60), minutesText: "14 min", stopsAwayText: "5 stops away"),
-            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(21*60), minutesText: "21 min", stopsAwayText: "8 stops away")
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: "2 stops away", arrivalTimeText: "1:35 PM"),
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(14*60), minutesText: "14 min", stopsAwayText: "5 stops away", arrivalTimeText: "1:44 PM"),
+            WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(21*60), minutesText: "21 min", stopsAwayText: "8 stops away", arrivalTimeText: "1:51 PM")
         ],
         message: nil
     )
@@ -1424,7 +1447,7 @@ private struct WidgetMBTAService {
             )
         }
 
-        let url = components.url!
+        guard let url = components.url else { throw URLError(.badURL) }
         var didRecord = false
         let startTime = Date()
         let data: Data
@@ -1512,7 +1535,7 @@ private struct WidgetMBTAService {
             URLQueryItem(name: "api_key", value: apiKey)
         ]
 
-        let url = components.url!
+        guard let url = components.url else { throw URLError(.badURL) }
         var didRecord = false
         let startTime = Date()
         let data: Data
@@ -1558,12 +1581,9 @@ private struct WidgetMBTAService {
 
         let stopsAway = targetStopSequence - currentStopSequence
 
-        // Vehicle hasn't started or is past the stop — show contextual text
+        // Bus hasn't started this trip or is past the stop
         if stopsAway <= 0 {
-            if let minutesAway, minutesAway < 2 {
-                return "Arriving"
-            }
-            return "Not yet departed"
+            return ""
         }
 
         if stopsAway == 1 {
@@ -1698,8 +1718,8 @@ private enum WidgetAPIUsageStore {
         routeName: "39",
         directionID: 0,
         directionLine: "To Back Bay Station",
-        stopID: nil,
-        stopName: "",
+        stopID: "place-NEU",
+        stopName: "Northeastern University",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(2*60), minutesText: "2 min", stopsAwayText: ""),
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(4*60), minutesText: "4 min", stopsAwayText: "")
@@ -1713,8 +1733,8 @@ private enum WidgetAPIUsageStore {
         routeName: "39",
         directionID: 0,
         directionLine: "To Back Bay Station",
-        stopID: nil,
-        stopName: "",
+        stopID: "place-NEU",
+        stopName: "Northeastern University",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(1*60), minutesText: "1 min", stopsAwayText: ""),
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(3*60), minutesText: "3 min", stopsAwayText: "")
@@ -1732,8 +1752,8 @@ private enum WidgetAPIUsageStore {
         routeName: "CT2",
         directionID: 0,
         directionLine: "To Sullivan Square",
-        stopID: nil,
-        stopName: "",
+        stopID: "place-sull",
+        stopName: "Sullivan Station",
         predictions: [
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(5*60), minutesText: "5 min", stopsAwayText: ""),
             WidgetArrivalDisplay(arrivalDate: now.addingTimeInterval(12*60), minutesText: "12 min", stopsAwayText: "")

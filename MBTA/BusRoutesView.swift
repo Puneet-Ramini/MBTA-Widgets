@@ -168,8 +168,8 @@ struct BusRoutesView: View {
         viewModel.selectedMode = .bus
         Task {
             await viewModel.selectSuggestedRoute(route)
+            dismiss()
         }
-        dismiss()
     }
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {

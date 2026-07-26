@@ -201,8 +201,8 @@ struct SubwayLinesView: View {
             viewModel.selectPresetLine(PresetLine(title: line.name, query: line.query, colorName: ""))
             Task {
                 await viewModel.loadRoute()
+                dismiss()
             }
-            dismiss()
         }
     }
 

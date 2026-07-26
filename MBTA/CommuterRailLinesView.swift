@@ -145,8 +145,8 @@ struct CommuterRailLinesView: View {
         viewModel.selectPresetLine(PresetLine(title: line.name, query: line.query, colorName: "purple"))
         Task {
             await viewModel.loadRoute()
+            dismiss()
         }
-        dismiss()
     }
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
