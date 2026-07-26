@@ -1245,13 +1245,17 @@ private struct WidgetStoredConfiguration: Decodable {
     let defaultFavorite: WidgetStoredFavorite?
     let overrides: [WidgetStoredOverride]
 
-    func activeFavorite(at date: Date) -> WidgetStoredFavorite? {
-        overrides.first(where: { $0.isActive(at: date) })?.favorite
+    func activeFavorite(at date: Date, forSlot slot: String? = nil) -> WidgetStoredFavorite? {
+        let filtered = slot != nil
+            ? overrides.filter { $0.widgetSlot == slot }
+            : overrides
+        return filtered.first(where: { $0.isActive(at: date) })?.favorite
     }
 }
 
 private struct WidgetStoredOverride: Decodable {
     let id: String
+    let widgetSlot: String?
     let favorite: WidgetStoredFavorite?
     let startHour: Int
     let startMinute: Int

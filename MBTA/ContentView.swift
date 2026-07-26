@@ -3451,6 +3451,19 @@ struct WidgetAssignmentSheet: View {
             }
             .padding(.horizontal, 20)
 
+            // "This is how it appears" hint with arrow
+            HStack(spacing: 6) {
+                Spacer()
+                Text("This is how it appears on your Home Screen")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.35))
+                Image(systemName: "arrow.turn.right.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 6)
+
             Spacer(minLength: 20)
 
             // Assign button
@@ -3562,11 +3575,22 @@ struct WidgetAssignmentSheet: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
 
-                    Text(currentAssignmentLabel(for: slot))
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.35))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    if slot == .wide {
+                        Text("Currently:")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.35))
+                        Text(currentAssignmentRoute(for: slot))
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.35))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        Text(currentAssignmentLabel(for: slot))
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.35))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
 
                 Spacer()
@@ -3612,6 +3636,23 @@ struct WidgetAssignmentSheet: View {
         }
 
         return "Currently: \(favorite.routeName) · \(favorite.directionDestination)"
+    }
+
+    private func currentAssignmentRoute(for slot: WidgetSlot) -> String {
+        let index: Int?
+        switch slot {
+        case .wide: index = mediumWidgetFavoriteIndex
+        case .small1: index = smallWidget1FavoriteIndex
+        case .small2: index = smallWidget2FavoriteIndex
+        }
+
+        guard let idx = index,
+              viewModel.quickFavorites.indices.contains(idx),
+              let favorite = viewModel.quickFavorites[idx] else {
+            return "None"
+        }
+
+        return "\(favorite.routeName) · \(favorite.directionDestination)"
     }
 
     // MARK: - Assignment Logic
