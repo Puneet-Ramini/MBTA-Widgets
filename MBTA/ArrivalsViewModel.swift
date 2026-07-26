@@ -132,8 +132,17 @@ struct SavedFavorite: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        mode = try container.decodeIfPresent(TransportMode.self, forKey: .mode) ?? .bus
-        routeID = try container.decode(String.self, forKey: .routeID)
+        let decodedRouteID = try container.decode(String.self, forKey: .routeID)
+        routeID = decodedRouteID
+        // Infer mode from routeID for old favorites saved without a mode field
+        let fallbackMode: TransportMode = {
+            let id = decodedRouteID.uppercased()
+            if id.starts(with: "CR-") { return .commuterRail }
+            if id.contains("RED") || id.contains("ORANGE") || id.contains("BLUE")
+                || id.contains("GREEN") || id.contains("MATTAPAN") { return .subway }
+            return .bus
+        }()
+        mode = try container.decodeIfPresent(TransportMode.self, forKey: .mode) ?? fallbackMode
         routeName = try container.decode(String.self, forKey: .routeName)
         directionID = try container.decode(Int.self, forKey: .directionID)
         directionName = try container.decode(String.self, forKey: .directionName)
@@ -738,6 +747,7 @@ final class ArrivalsViewModel: ObservableObject {
     }
 
     func loadArrivals() async {
+        guard !isLoadingArrivals else { return }
         errorMessage = nil
 
         guard let routeID = selectedRoute?.id else {
@@ -763,21 +773,14 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let allPredictions = try await MBTAService.shared.fetchPredictions(
+            let predictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
+                directionId: selectedDirectionID,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
-
-            // Filter by selected direction so subway/rail stops only show the chosen direction
-            let predictions: [BusArrival]
-            if let dirID = selectedDirectionID {
-                predictions = allPredictions.filter { $0.directionId == dirID }
-            } else {
-                predictions = allPredictions
-            }
 
             arrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
@@ -835,21 +838,14 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let allPredictions = try await MBTAService.shared.fetchPredictions(
+            let predictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
+                directionId: selectedDirectionID,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
-
-            // Filter by selected direction so subway/rail stops only show the chosen direction
-            let predictions: [BusArrival]
-            if let dirID = selectedDirectionID {
-                predictions = allPredictions.filter { $0.directionId == dirID }
-            } else {
-                predictions = allPredictions
-            }
 
             var newArrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
@@ -871,12 +867,19 @@ final class ArrivalsViewModel: ObservableObject {
             // This prevents the third tile from flashing "--" between refreshes
             let now = Date()
             if newArrivals.count < arrivals.count {
+                let newIDs = Set(newArrivals.map(\.id))
                 for i in newArrivals.count..<arrivals.count {
                     let old = arrivals[i]
                     let arrivalTime = old.arrivalTime ?? old.departureTime
-                    if let arrivalTime, arrivalTime > now {
+                    if let arrivalTime, arrivalTime > now, !newIDs.contains(old.id) {
                         newArrivals.append(old)
                     }
+                }
+                // Re-sort merged results by arrival time
+                newArrivals.sort { a, b in
+                    let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
+                    let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
+                    return aTime < bTime
                 }
             }
 
@@ -893,23 +896,38 @@ final class ArrivalsViewModel: ObservableObject {
 
     private func loadQuickRoutes() {
         let decoder = JSONDecoder()
-        quickFavorites = QuickRouteKeys.all.map { key in
+        
+        // Load from standard UserDefaults (primary source in app)
+        let fromStandard: [SavedFavorite?] = QuickRouteKeys.all.map { key in
             guard
                 let data = UserDefaults.standard.data(forKey: key),
                 let favorite = try? decoder.decode(SavedFavorite.self, from: data)
             else {
                 return nil
             }
-
             return favorite
         }
         
-        // Also sync to app group for widgets on first load
+        // If standard defaults is empty, try app group (recovery from desync)
+        let hasStandardData = fromStandard.contains(where: { $0 != nil })
+        if !hasStandardData,
+           let appGroupDefaults = UserDefaults(suiteName: "group.Widgets.MBTA"),
+           let data = appGroupDefaults.data(forKey: "quickFavorites"),
+           let restored = try? decoder.decode([SavedFavorite?].self, from: data),
+           restored.contains(where: { $0 != nil }) {
+            quickFavorites = restored
+        } else {
+            quickFavorites = fromStandard
+        }
+        
+        // Sync both stores so they're consistent
         saveQuickRoutes()
     }
 
     private func saveQuickRoutes() {
         let encoder = JSONEncoder()
+        
+        // Save to both standard UserDefaults and app group atomically
         for (index, key) in QuickRouteKeys.all.enumerated() {
             if let favorite = quickFavorites[index], let data = try? encoder.encode(favorite) {
                 UserDefaults.standard.set(data, forKey: key)
@@ -918,10 +936,10 @@ final class ArrivalsViewModel: ObservableObject {
             }
         }
         
-        // Also save to app group for widgets
         if let appGroupDefaults = UserDefaults(suiteName: "group.Widgets.MBTA"),
            let favoritesData = try? encoder.encode(quickFavorites) {
             appGroupDefaults.set(favoritesData, forKey: "quickFavorites")
+            appGroupDefaults.synchronize()
             
             #if canImport(WidgetKit)
             WidgetCenter.shared.reloadAllTimelines()
@@ -1193,9 +1211,11 @@ final class ArrivalsViewModel: ObservableObject {
         // which caused the Task to be silently cancelled in Release/TestFlight builds.
         let weakSelf = Weak(self)
         liveActivityPollingTask = Task.detached {
+            var consecutiveErrors = 0
             while !Task.isCancelled {
-                // Sleep off the main actor — this is the critical difference vs before
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                // Sleep with backoff: 30s normal, up to 2 min on repeated errors
+                let backoffSeconds = min(30 * (1 + consecutiveErrors), 120)
+                try? await Task.sleep(nanoseconds: UInt64(backoffSeconds) * 1_000_000_000)
                 guard !Task.isCancelled else { break }
                 
                 do {
@@ -1245,6 +1265,8 @@ final class ArrivalsViewModel: ObservableObject {
                         break
                     }
                     
+                    consecutiveErrors = 0
+                    
                     // Update shared tracker so the timer sees fresh data
                     tracker.currentTrackedTime = newArrivalTime
                     tracker.latestStopsAway = bestPrediction.stopsAway ?? 0
@@ -1258,7 +1280,9 @@ final class ArrivalsViewModel: ObservableObject {
                     
                     // Auto-dismiss: if arrival is within 1 minute or has passed
                     if newMinutesAway <= 1 || newArrivalTime.timeIntervalSinceNow < 60 {
-                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        // Wait until the arrival time passes, plus a short buffer
+                        let remaining = max(newArrivalTime.timeIntervalSinceNow + 30, 15)
+                        try? await Task.sleep(nanoseconds: UInt64(remaining) * 1_000_000_000)
                         await MainActor.run {
                             weakSelf.value?.liveActivityTimerTask?.cancel()
                         }
@@ -1295,7 +1319,7 @@ final class ArrivalsViewModel: ObservableObject {
                         }
                     }
                 } catch {
-                    // On error, continue trying — don't break the loop
+                    consecutiveErrors += 1
                     print("Failed to update Live Activity: \(error)")
                 }
             }

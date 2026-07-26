@@ -403,8 +403,9 @@ struct HomeView: View {
     private func routeBadgeDisplayName(for routeID: String, favorite: SavedFavorite) -> String {
         let route = routeID.uppercased()
         
-        // Bus — show the route number/name (e.g. "CT2", "66", "39")
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        // Bus — show the route number/name (e.g. "CT2", "66", "SL1")
+        if route.allSatisfy({ $0.isNumber }) || route.first?.isNumber == true
+            || route.starts(with: "SL") || route.starts(with: "CT") {
             return favorite.routeName
         }
         
@@ -429,7 +430,8 @@ struct HomeView: View {
         let route = routeID.uppercased()
         
         // Bus — yellow
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.allSatisfy({ $0.isNumber }) || route.first?.isNumber == true
+            || route.starts(with: "SL") || route.starts(with: "CT") {
             return Color(red: 255/255, green: 200/255, blue: 0/255)
         }
         if route.contains("RED") || route.contains("MATTAPAN") {
@@ -453,7 +455,8 @@ struct HomeView: View {
     private func routeTextColor(for routeID: String) -> Color {
         let route = routeID.uppercased()
         // Bus — black text on yellow
-        if route.allSatisfy({ $0.isNumber }) || route.starts(with: "SL") || route.starts(with: "CT") {
+        if route.allSatisfy({ $0.isNumber }) || route.first?.isNumber == true
+            || route.starts(with: "SL") || route.starts(with: "CT") {
             return .black
         }
         return .white

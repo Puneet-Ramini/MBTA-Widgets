@@ -72,6 +72,7 @@ struct MainTabView: View {
                 viewModel.handleReturnToForeground()
                 Task {
                     await viewModel.loadShortcutArrivals()
+                    await viewModel.loadAlerts()
                 }
             }
         }

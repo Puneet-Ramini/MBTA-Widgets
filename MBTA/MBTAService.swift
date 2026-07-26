@@ -136,8 +136,8 @@ final class MBTAService {
             }
     }
 
-    /// Fetch predictions for a stop, optionally filtered by route.
-    func fetchPredictions(stopId: String, routeId: String?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
+    /// Fetch predictions for a stop, optionally filtered by route and direction.
+    func fetchPredictions(stopId: String, routeId: String?, directionId: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "filter[stop]", value: stopId),
             URLQueryItem(name: "sort", value: "arrival_time")
@@ -145,6 +145,10 @@ final class MBTAService {
 
         if let routeId, !routeId.isEmpty {
             queryItems.append(URLQueryItem(name: "filter[route]", value: routeId))
+        }
+
+        if let directionId {
+            queryItems.append(URLQueryItem(name: "filter[direction_id]", value: String(directionId)))
         }
 
         let url = try buildURL(path: "predictions", queryItems: queryItems)
@@ -216,7 +220,7 @@ final class MBTAService {
 
         let stopsAway = targetStopSequence - currentStopSequence
 
-        // Vehicle hasn't started or is past the stop
+        // Bus hasn't started this trip or is past the stop
         if stopsAway <= 0 {
             return nil
         }
