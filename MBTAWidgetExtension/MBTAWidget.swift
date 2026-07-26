@@ -1377,6 +1377,103 @@ private enum WidgetFirebaseLogger {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         _ = try await URLSession.shared.data(for: request)
+
+        // Update daily_stats summary
+        await incrementDailyStats(deviceId: device)
+    }
+
+    // MARK: - Daily Stats (REST)
+
+    /// ET date key (YYYY-MM-DD)
+    private static func todayET() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "America/New_York")
+        return f.string(from: Date())
+    }
+
+    private static let firestoreBase = "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents"
+
+    /// Increment total_api_calls via Firestore commit with a fieldTransform.
+    /// Then check/create the daily_users/{date}/users/{deviceId} doc and bump unique_users if new.
+    private static func incrementDailyStats(deviceId: String) async {
+        let dateKey = todayET()
+
+        // 1. Increment total_api_calls using a commit with transforms
+        let statsPath = "projects/\(projectID)/databases/(default)/documents/daily_stats/\(dateKey)"
+
+        let incrementCommit: [String: Any] = [
+            "writes": [[
+                "transform": [
+                    "document": statsPath,
+                    "fieldTransforms": [
+                        [
+                            "fieldPath": "total_api_calls",
+                            "increment": ["integerValue": "1"]
+                        ]
+                    ]
+                ]
+            ],
+            // Ensure the date field exists
+            [
+                "update": [
+                    "name": statsPath,
+                    "fields": [
+                        "date": ["stringValue": dateKey]
+                    ]
+                ],
+                "updateMask": ["fieldPaths": ["date"]]
+            ]]
+        ]
+
+        guard let commitURL = URL(string: "\(firestoreBase):commit?key=\(apiKey)") else { return }
+        var req = URLRequest(url: commitURL)
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: incrementCommit)
+        _ = try? await URLSession.shared.data(for: req)
+
+        // 2. Check if user doc exists; if not, create it and increment unique_users
+        let userDocPath = "daily_users/\(dateKey)/users/\(deviceId)"
+        guard let userURL = URL(string: "\(firestoreBase)/\(userDocPath)?key=\(apiKey)") else { return }
+
+        var getReq = URLRequest(url: userURL)
+        getReq.httpMethod = "GET"
+
+        let (_, response) = (try? await URLSession.shared.data(for: getReq)) ?? (Data(), URLResponse())
+        let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+        if httpStatus == 404 {
+            // User not seen today — create the doc
+            let userFields: [String: Any] = ["fields": [
+                "first_seen": ["stringValue": ISO8601DateFormatter().string(from: Date())]
+            ]]
+            var createReq = URLRequest(url: userURL)
+            createReq.httpMethod = "PATCH"
+            createReq.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            createReq.httpBody = try? JSONSerialization.data(withJSONObject: userFields)
+            _ = try? await URLSession.shared.data(for: createReq)
+
+            // Increment unique_users
+            let uniqueCommit: [String: Any] = [
+                "writes": [[
+                    "transform": [
+                        "document": statsPath,
+                        "fieldTransforms": [
+                            [
+                                "fieldPath": "unique_users",
+                                "increment": ["integerValue": "1"]
+                            ]
+                        ]
+                    ]
+                ]]
+            ]
+            var uReq = URLRequest(url: commitURL)
+            uReq.httpMethod = "POST"
+            uReq.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            uReq.httpBody = try? JSONSerialization.data(withJSONObject: uniqueCommit)
+            _ = try? await URLSession.shared.data(for: uReq)
+        }
     }
 }
 
