@@ -94,6 +94,8 @@ private extension String {
             return "E"
         } else if route.contains("MATTAPAN") {
             return "ML"
+        } else if route.starts(with: "CR-") {
+            return "CR"
         }
         
         return self
@@ -110,6 +112,11 @@ struct MBTAWidgetEntry: TimelineEntry {
     let stopName: String
     let predictions: [WidgetArrivalDisplay]
     let message: String?
+
+    /// Use routeID for badge display (has "CR-" prefix for commuter rail), fall back to routeName
+    var badgeKey: String {
+        routeID ?? routeName
+    }
 }
 
 struct WidgetArrivalDisplay: Hashable {
@@ -208,10 +215,16 @@ struct MBTAWidgetProvider: TimelineProvider {
         }
         
         let predictions = state.arrivals.map { arrival in
-            WidgetArrivalDisplay(
+            let subtitle: String
+            if state.mode.showsStopsAway {
+                subtitle = arrival.stopsAwayText
+            } else {
+                subtitle = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
+            }
+            return WidgetArrivalDisplay(
                 arrivalDate: arrival.arrivalDate,
                 minutesText: formatMinutes(arrival.arrivalDate),
-                stopsAwayText: arrival.stopsAwayText
+                stopsAwayText: subtitle
             )
         }
         
@@ -274,6 +287,7 @@ struct MBTAWidgetProvider: TimelineProvider {
                 mode: selection.mode,
                 routeID: selection.routeID,
                 stopID: selection.stopID,
+                directionID: selection.directionID,
                 routeName: selection.routeName,
                 directionName: selection.directionLine,
                 stopName: selection.stopName,
@@ -338,6 +352,7 @@ struct MBTAWidgetProvider: TimelineProvider {
                 mode: mode,
                 routeID: favorite.routeID,
                 stopID: favorite.stopID,
+                directionID: favorite.directionID,
                 routeName: favorite.routeName,
                 directionName: directionLine,
                 stopName: favorite.stopName,
@@ -383,10 +398,16 @@ struct MBTAWidgetProvider: TimelineProvider {
             stopName: state.stopName,
             predictions: state.arrivals.prefix(3).map { arrival in
                 let minutes = max(Int(arrival.arrivalDate.timeIntervalSince(startDate) / 60), 0)
+                let subtitle: String
+                if state.mode.showsStopsAway {
+                    subtitle = arrival.stopsAwayText
+                } else {
+                    subtitle = Self.arrivalTimeFormatter.string(from: arrival.arrivalDate)
+                }
                 return WidgetArrivalDisplay(
                     arrivalDate: arrival.arrivalDate,
                     minutesText: minutes < 1 ? "Now" : "\(minutes) min",
-                    stopsAwayText: state.mode.showsStopsAway ? arrival.stopsAwayText : ""
+                    stopsAwayText: subtitle
                 )
             },
             message: state.message
@@ -408,6 +429,13 @@ struct MBTAWidgetProvider: TimelineProvider {
                 )
             }
     }
+
+    fileprivate static let arrivalTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "h:mm a"
+        return f
+    }()
 }
 
 struct MBTAWidgetEntryView: View {
@@ -418,13 +446,13 @@ struct MBTAWidgetEntryView: View {
         VStack(alignment: .leading, spacing: 4) {
             // Header row: route badge + direction/stop + refresh button
             HStack(alignment: .top) {
-                Text(entry.routeName.displayRouteName)
+                Text(entry.badgeKey.displayRouteName)
                     .font(.headline)
                     .bold()
-                    .foregroundColor(entry.routeName.routeTextColor)
+                    .foregroundColor(entry.badgeKey.routeTextColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(entry.routeName.routeBadgeColor)
+                    .background(entry.badgeKey.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -740,6 +768,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
                 mode: mode,
                 routeID: favorite.routeID,
                 stopID: favorite.stopID,
+                directionID: favorite.directionID,
                 routeName: favorite.routeName,
                 directionName: directionLine,
                 stopName: favorite.stopName,
@@ -831,12 +860,12 @@ struct SmallFavoriteWidgetView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 // Route badge
-                Text(entry.routeName.displayRouteName)
+                Text(entry.badgeKey.displayRouteName)
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(entry.routeName.routeTextColor)
+                    .foregroundColor(entry.badgeKey.routeTextColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(entry.routeName.routeBadgeColor)
+                    .background(entry.badgeKey.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 
                 Spacer()
@@ -984,46 +1013,32 @@ struct BusArrivalLiveActivity: Widget {
             // Lock Screen & Banner UI
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    if context.attributes.routeID.isCommuterRail {
-                        Image(systemName: "train.side.front.car")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.purple)
-                    } else {
-                        Text(context.attributes.routeID.displayRouteName)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(context.attributes.routeID.routeTextColor)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(context.attributes.routeID.routeBadgeColor)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    Text(context.attributes.routeID.displayRouteName)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(context.attributes.routeID.routeTextColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(context.attributes.routeID.routeBadgeColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(context.attributes.destination)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
                         
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(context.attributes.destination)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
-                            
-                            Text(context.attributes.stopName)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(context.attributes.stopName)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
                     
                     Spacer()
                     
-                    VStack(spacing: 2) {
-                        Text(context.state.minutesText)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        if context.state.stopsAway > 0 {
-                            Text("\(context.state.stopsAway) stops")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    Text(context.state.minutesText)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                     .background(Color(red: 0/255, green: 57/255, blue: 166/255))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
@@ -1034,28 +1049,22 @@ struct BusArrivalLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    if context.attributes.routeID.isCommuterRail {
-                        Image(systemName: "train.side.front.car")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundColor(.purple)
-                    } else {
-                        HStack(spacing: 6) {
-                            Text(context.attributes.routeID.displayRouteName)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(context.attributes.routeID.routeTextColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(context.attributes.routeID.routeBadgeColor)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("To")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text(context.attributes.destination)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .lineLimit(1)
-                            }
+                    HStack(spacing: 6) {
+                        Text(context.attributes.routeID.displayRouteName)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(context.attributes.routeID.routeTextColor)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(context.attributes.routeID.routeBadgeColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("To")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(context.attributes.destination)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
                         }
                     }
                 }
@@ -1072,19 +1081,13 @@ struct BusArrivalLiveActivity: Widget {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             } compactLeading: {
-                if context.attributes.routeID.isCommuterRail {
-                    Image(systemName: "train.side.front.car")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.purple)
-                } else {
-                    Text(context.attributes.routeID.displayRouteName)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(context.attributes.routeID.routeTextColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(context.attributes.routeID.routeBadgeColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
+                Text(context.attributes.routeID.displayRouteName)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(context.attributes.routeID.routeTextColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(context.attributes.routeID.routeBadgeColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
             } compactTrailing: {
                 Text(context.state.minutesText)
                     .font(.system(size: 13, weight: .bold))
@@ -1407,7 +1410,7 @@ private struct WidgetVehicleAttributes: Decodable {
 private struct WidgetMBTAService {
     private let apiKey = "6aaf4b37ca464bc298e7573999c87d4d"
 
-    func fetchPredictions(mode: WidgetTransportMode, routeID: String, stopID: String, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
+    func fetchPredictions(mode: WidgetTransportMode, routeID: String, stopID: String, directionID: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
         var components = URLComponents(string: "https://api-v3.mbta.com/predictions")!
         components.queryItems = [
             URLQueryItem(name: "filter[route]", value: routeID),
@@ -1415,6 +1418,11 @@ private struct WidgetMBTAService {
             URLQueryItem(name: "sort", value: "arrival_time"),
             URLQueryItem(name: "api_key", value: apiKey)
         ]
+        if let directionID {
+            components.queryItems?.append(
+                URLQueryItem(name: "filter[direction_id]", value: String(directionID))
+            )
+        }
 
         let url = components.url!
         var didRecord = false
@@ -1545,15 +1553,17 @@ private struct WidgetMBTAService {
 
     private func formatStopsAway(targetStopSequence: Int?, currentStopSequence: Int?, minutesAway: Int?) -> String {
         guard let targetStopSequence, let currentStopSequence else {
-            return "stops away unavailable"
+            return ""
         }
 
-        let directDistance = max(targetStopSequence - currentStopSequence, 0)
-        let stopsAway: Int
-        if directDistance == 0, targetStopSequence > 1, let minutesAway, minutesAway > 1 {
-            stopsAway = targetStopSequence - 1
-        } else {
-            stopsAway = directDistance
+        let stopsAway = targetStopSequence - currentStopSequence
+
+        // Vehicle hasn't started or is past the stop — show contextual text
+        if stopsAway <= 0 {
+            if let minutesAway, minutesAway < 2 {
+                return "Arriving"
+            }
+            return "Not yet departed"
         }
 
         if stopsAway == 1 {

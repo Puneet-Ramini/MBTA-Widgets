@@ -214,12 +214,14 @@ final class MBTAService {
             return nil
         }
 
-        let directDistance = max(targetStopSequence - currentStopSequence, 0)
-        if directDistance == 0, targetStopSequence > 1, let minutesAway, minutesAway > 1 {
-            return targetStopSequence - 1
+        let stopsAway = targetStopSequence - currentStopSequence
+
+        // Vehicle hasn't started or is past the stop
+        if stopsAway <= 0 {
+            return nil
         }
 
-        return directDistance
+        return stopsAway
     }
 
     private func routeMatches(_ route: Route, query: String, exactOnly: Bool) -> Bool {
