@@ -49,8 +49,17 @@ public struct BusArrivalAttributes: ActivityAttributes {
     }
 }
 
+enum WidgetSlotType: String, Codable, CaseIterable, Identifiable {
+    case wide = "Wide Widget"
+    case small1 = "Small Widget 1"
+    case small2 = "Small Widget 2"
+
+    var id: String { rawValue }
+}
+
 struct WidgetScheduleOverride: Codable, Identifiable {
     let id: String
+    var widgetSlot: WidgetSlotType
     var favorite: SavedFavorite?
     var startHour: Int
     var startMinute: Int
@@ -59,13 +68,15 @@ struct WidgetScheduleOverride: Codable, Identifiable {
 
     init(
         id: String = UUID().uuidString,
+        widgetSlot: WidgetSlotType = .wide,
         favorite: SavedFavorite? = nil,
-        startHour: Int = 16,
+        startHour: Int = 7,
         startMinute: Int = 0,
-        endHour: Int = 18,
+        endHour: Int = 9,
         endMinute: Int = 0
     ) {
         self.id = id
+        self.widgetSlot = widgetSlot
         self.favorite = favorite
         self.startHour = startHour
         self.startMinute = startMinute
@@ -575,9 +586,17 @@ final class ArrivalsViewModel: ObservableObject {
         saveWidgetConfiguration()
     }
 
-    func addWidgetOverride() {
+    func addWidgetOverride(for slot: WidgetSlotType = .wide) {
         let fallbackFavorite = quickFavorites.compactMap { $0 }.first
-        widgetOverrides.append(WidgetScheduleOverride(favorite: fallbackFavorite))
+        widgetOverrides.append(WidgetScheduleOverride(widgetSlot: slot, favorite: fallbackFavorite))
+        saveWidgetConfiguration()
+    }
+
+    func updateWidgetOverrideSlot(id: String, slot: WidgetSlotType) {
+        guard let index = widgetOverrides.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        widgetOverrides[index].widgetSlot = slot
         saveWidgetConfiguration()
     }
 
@@ -706,7 +725,9 @@ final class ArrivalsViewModel: ObservableObject {
                let matchingStop = stops.first(where: { $0.name == preferredName }) {
                 selectedStopID = matchingStop.id
             } else {
-                selectedStopID = stops.first?.id
+                // Default to the middle stop instead of the first
+                let middleIndex = stops.count / 2
+                selectedStopID = stops.indices.contains(middleIndex) ? stops[middleIndex].id : stops.first?.id
             }
             saveWidgetSelection()
         } catch {
