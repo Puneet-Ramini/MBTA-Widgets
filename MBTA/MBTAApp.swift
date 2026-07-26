@@ -7,15 +7,23 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseMessaging
 import UserNotifications
+import AppIntents
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
         
-        // Request notification permission (needed for Live Activity push updates)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+        // Set up Firebase Cloud Messaging
+        Messaging.messaging().delegate = self
+        
+        // Register App Shortcuts with the system so Siri can discover them
+        MBTAShortcuts.updateAppShortcutParameters()
+        
+        // Request notification permission
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error {
                 print("Notification permission error: \(error)")
             }
@@ -28,12 +36,23 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // Forward APNs token to Firebase so FCM can send via APNs
+        Messaging.messaging().apnsToken = deviceToken
         print("APNs device token: \(deviceToken.map { String(format: "%02x", $0) }.joined())")
     }
     
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         print("Failed to register for remote notifications: \(error)")
+    }
+    
+    // MARK: - MessagingDelegate
+    
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let fcmToken else { return }
+        print("FCM token: \(fcmToken)")
+        // Store the token so it can be sent to your backend for targeting this device
+        UserDefaults.standard.set(fcmToken, forKey: "fcmToken")
     }
 }
 
