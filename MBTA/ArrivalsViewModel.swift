@@ -739,9 +739,9 @@ final class ArrivalsViewModel: ObservableObject {
 
     func loadArrivals() async {
         errorMessage = nil
-        arrivals = []
 
         guard let routeID = selectedRoute?.id else {
+            arrivals = []
             errorMessage = "Load a bus route first."
             return
         }
@@ -817,7 +817,7 @@ final class ArrivalsViewModel: ObservableObject {
         reloadTimer?.cancel()
         reloadTimer = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                try? await Task.sleep(nanoseconds: 20_000_000_000) // 20 seconds
                 await loadArrivalsQuietly()
             }
         }
@@ -851,7 +851,7 @@ final class ArrivalsViewModel: ObservableObject {
                 predictions = allPredictions
             }
 
-            arrivals = Array(predictions.prefix(3)).map { arrival in
+            var newArrivals = Array(predictions.prefix(3)).map { arrival in
                 BusArrival(
                     id: arrival.id,
                     routeId: arrival.routeId,
@@ -866,6 +866,21 @@ final class ArrivalsViewModel: ObservableObject {
                     status: arrival.status
                 )
             }
+
+            // If new data has fewer results, keep old predictions that haven't expired
+            // This prevents the third tile from flashing "--" between refreshes
+            let now = Date()
+            if newArrivals.count < arrivals.count {
+                for i in newArrivals.count..<arrivals.count {
+                    let old = arrivals[i]
+                    let arrivalTime = old.arrivalTime ?? old.departureTime
+                    if let arrivalTime, arrivalTime > now {
+                        newArrivals.append(old)
+                    }
+                }
+            }
+
+            arrivals = Array(newArrivals.prefix(3))
         } catch {
             // Silent fail - don't update error message during background refresh
         }
