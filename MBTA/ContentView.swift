@@ -3066,6 +3066,8 @@ private extension String {
             return Color(red: 0/255, green: 132/255, blue: 61/255) // MBTA Green
         } else if route.contains("MATTAPAN") {
             return Color(red: 218/255, green: 41/255, blue: 28/255)
+        } else if route.starts(with: "CR-") {
+            return Color(red: 128/255, green: 0/255, blue: 160/255) // MBTA Commuter Rail purple
         }
         
         return .gray
@@ -3109,6 +3111,8 @@ private extension String {
             return "E"
         } else if route.contains("MATTAPAN") {
             return "ML"
+        } else if route.starts(with: "CR-") {
+            return "CR"
         }
         
         return self

@@ -10,6 +10,7 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import AppIntents
+import StoreKit
 
 class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
     func application(_ application: UIApplication,
@@ -60,6 +61,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
 struct MBTAApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var updateChecker = AppUpdateChecker.shared
+    @Environment(\.requestReview) private var requestReview
 
     var body: some Scene {
         WindowGroup {
@@ -67,12 +69,27 @@ struct MBTAApp: App {
                 .preferredColorScheme(.dark)
                 .onAppear {
                     updateChecker.checkIfNeeded()
+                    requestReviewIfNeeded()
                 }
                 .overlay {
                     if updateChecker.updateRequired {
                         UpdatePromptView()
                     }
                 }
+        }
+    }
+
+    private func requestReviewIfNeeded() {
+        let key = "appOpenCount"
+        let count = UserDefaults.standard.integer(forKey: key) + 1
+        UserDefaults.standard.set(count, forKey: key)
+
+        // Show review prompt on the 5th and every 50th open after that
+        if count == 5 || (count > 5 && count % 50 == 0) {
+            // Delay slightly so the UI is fully loaded
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                requestReview()
+            }
         }
     }
 }
