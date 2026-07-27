@@ -6,14 +6,12 @@
 //
 
 import SwiftUI
-import AppIntents
 
 struct HomeView: View {
     @ObservedObject var viewModel: ArrivalsViewModel
     @State private var isEditingShortcuts = false
     @State private var navigateToSearch = false
     @State private var navigateToWidgets = false
-    @State private var showSiriTip = true
     
     /// Callback to switch to Search tab and load a favorite
     var onOpenFavorite: ((SavedFavorite) -> Void)?
@@ -43,7 +41,6 @@ struct HomeView: View {
                 exploreRoutesCard
                 shortcutsSection
                 widgetCTACard
-                siriTipSection
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -388,18 +385,6 @@ struct HomeView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-    
-    // MARK: - Siri Tip
-    
-    private var siriTipSection: some View {
-        VStack(spacing: 12) {
-            SiriTipView(intent: CheckArrivalIntent(), isVisible: $showSiriTip)
-                .siriTipViewStyle(.dark)
-            
-            ShortcutsLink()
-                .shortcutsLinkStyle(.dark)
-        }
     }
     
     // MARK: - Helpers

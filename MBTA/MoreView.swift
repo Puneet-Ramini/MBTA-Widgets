@@ -6,10 +6,13 @@
 //
 
 import SwiftUI
+import AppIntents
+
 
 struct MoreView: View {
     @State private var isShowingWhatItDoes = false
     @State private var isShowingAboutApp = false
+
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
@@ -132,6 +135,11 @@ struct MoreView: View {
                         )
                     }
                     .buttonStyle(.plain)
+
+                    // Add to Siri Shortcuts
+                    ShortcutsLink()
+                        .shortcutsLinkStyle(.automaticOutline)
+                        .tint(.cyan)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 100)
