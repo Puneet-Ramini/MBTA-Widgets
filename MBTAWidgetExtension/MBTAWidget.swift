@@ -1319,67 +1319,60 @@ private enum WidgetFirebaseLogger {
     private static let projectID = "mbta-widgets"
     private static let apiKey = "AIzaSyAcIWs06AICYqzTmLNt2vrgLd2rHKdt95c"
 
-    static var deviceID: String {
-        let defaults = UserDefaults(suiteName: "group.Widgets.MBTA")
-        if let existing = defaults?.string(forKey: "deviceID") {
+    /// Cached device ID — read once from Keychain (shared with the main app)
+    private static let _deviceID: String = {
+        let service = "com.mbta.monitoring"
+        let account = "deviceID"
+
+        // 1. Try Keychain (same location the main app uses)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true
+        ]
+        var result: AnyObject?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data,
+           let existing = String(data: data, encoding: .utf8) {
             return existing
         }
+
+        // 2. Fall back to app group UserDefaults (migration from old widget ID)
+        let defaults = UserDefaults(suiteName: "group.Widgets.MBTA")
+        if let existing = defaults?.string(forKey: "deviceID") {
+            // Migrate to Keychain so it stays in sync with the app
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecValueData as String: Data(existing.utf8),
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            ]
+            SecItemAdd(addQuery as CFDictionary, nil)
+            return existing
+        }
+
+        // 3. Generate new ID and save to both Keychain and app group
         let newID = UUID().uuidString
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data(newID.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
         defaults?.set(newID, forKey: "deviceID")
         return newID
-    }
+    }()
+
+    static var deviceID: String { _deviceID }
 
     static func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") {
         Task.detached {
-            do {
-                try await sendLog(endpoint: endpoint, statusCode: statusCode, responseTimeMs: responseTimeMs, routeName: routeName, directionName: directionName, stopName: stopName, source: source)
-            } catch {
-                // Silently fail — logging should never block widget functionality
-            }
+            await incrementDailyStats(deviceId: deviceID)
         }
-    }
-
-    private static func sendLog(endpoint: String, statusCode: Int?, responseTimeMs: Int?, routeName: String?, directionName: String?, stopName: String?, source: String) async throws {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let device = deviceID
-
-        // Build Firestore document fields
-        var fields: [String: Any] = [
-            "endpoint": ["stringValue": endpoint],
-            "source": ["stringValue": source],
-            "timestamp": ["stringValue": timestamp],
-            "device_id": ["stringValue": device]
-        ]
-
-        if let statusCode {
-            fields["status_code"] = ["integerValue": String(statusCode)]
-        }
-        if let responseTimeMs {
-            fields["response_time_ms"] = ["integerValue": String(responseTimeMs)]
-        }
-        if let routeName {
-            fields["route_name"] = ["stringValue": routeName]
-        }
-        if let directionName {
-            fields["direction_name"] = ["stringValue": directionName]
-        }
-        if let stopName {
-            fields["stop_name"] = ["stringValue": stopName]
-        }
-
-        let body: [String: Any] = ["fields": fields]
-
-        guard let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents/api_logs?key=\(apiKey)") else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        _ = try await URLSession.shared.data(for: request)
-
-        // Update daily_stats summary
-        await incrementDailyStats(deviceId: device)
     }
 
     // MARK: - Daily Stats (REST)
@@ -1394,12 +1387,10 @@ private enum WidgetFirebaseLogger {
 
     private static let firestoreBase = "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents"
 
-    /// Increment total_api_calls via Firestore commit with a fieldTransform.
-    /// Then check/create the daily_users/{date}/users/{deviceId} doc and bump unique_users if new.
+    /// Increment total_api_calls via Firestore commit with a fieldTransform (1 write, 0 reads).
     private static func incrementDailyStats(deviceId: String) async {
         let dateKey = todayET()
 
-        // 1. Increment total_api_calls using a commit with transforms
         let statsPath = "projects/\(projectID)/databases/(default)/documents/daily_stats/\(dateKey)"
 
         let incrementCommit: [String: Any] = [
@@ -1432,48 +1423,6 @@ private enum WidgetFirebaseLogger {
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: incrementCommit)
         _ = try? await URLSession.shared.data(for: req)
-
-        // 2. Check if user doc exists; if not, create it and increment unique_users
-        let userDocPath = "daily_users/\(dateKey)/users/\(deviceId)"
-        guard let userURL = URL(string: "\(firestoreBase)/\(userDocPath)?key=\(apiKey)") else { return }
-
-        var getReq = URLRequest(url: userURL)
-        getReq.httpMethod = "GET"
-
-        let (_, response) = (try? await URLSession.shared.data(for: getReq)) ?? (Data(), URLResponse())
-        let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
-
-        if httpStatus == 404 {
-            // User not seen today — create the doc
-            let userFields: [String: Any] = ["fields": [
-                "first_seen": ["stringValue": ISO8601DateFormatter().string(from: Date())]
-            ]]
-            var createReq = URLRequest(url: userURL)
-            createReq.httpMethod = "PATCH"
-            createReq.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            createReq.httpBody = try? JSONSerialization.data(withJSONObject: userFields)
-            _ = try? await URLSession.shared.data(for: createReq)
-
-            // Increment unique_users
-            let uniqueCommit: [String: Any] = [
-                "writes": [[
-                    "transform": [
-                        "document": statsPath,
-                        "fieldTransforms": [
-                            [
-                                "fieldPath": "unique_users",
-                                "increment": ["integerValue": "1"]
-                            ]
-                        ]
-                    ]
-                ]]
-            ]
-            var uReq = URLRequest(url: commitURL)
-            uReq.httpMethod = "POST"
-            uReq.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            uReq.httpBody = try? JSONSerialization.data(withJSONObject: uniqueCommit)
-            _ = try? await URLSession.shared.data(for: uReq)
-        }
     }
 }
 
@@ -1615,6 +1564,7 @@ private struct WidgetMBTAService {
                     )
                 )
             }
+            .sorted { $0.arrivalDate < $1.arrivalDate }
             .prefix(3)
             .map { $0 }
     }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseFirestore
 import FirebaseMessaging
 import UserNotifications
 import AppIntents
@@ -52,8 +53,39 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let fcmToken else { return }
         print("FCM token: \(fcmToken)")
-        // Store the token so it can be sent to your backend for targeting this device
         UserDefaults.standard.set(fcmToken, forKey: "fcmToken")
+        
+        // Register token in Firestore so we can target this device for push notifications
+        registerFCMToken(fcmToken)
+    }
+    
+    private func registerFCMToken(_ token: String) {
+        let deviceID = FirebaseMonitoring.shared.publicDeviceID
+        let db = Firestore.firestore()
+        let docRef = db.collection("fcm_devices").document(deviceID)
+        
+        // Check if this device already exists — if not, set createdAt for user tracking
+        docRef.getDocument { snapshot, error in
+            var data: [String: Any] = [
+                "fcmToken": token,
+                "deviceID": deviceID,
+                "platform": "iOS",
+                "lastSeen": FieldValue.serverTimestamp()
+            ]
+            
+            // Only set createdAt on the very first registration (tracks when user first installed)
+            if snapshot?.exists != true {
+                data["createdAt"] = FieldValue.serverTimestamp()
+            }
+            
+            docRef.setData(data, merge: true) { error in
+                if let error {
+                    print("Failed to register FCM token: \(error.localizedDescription)")
+                } else {
+                    print("FCM token registered in Firestore")
+                }
+            }
+        }
     }
 }
 

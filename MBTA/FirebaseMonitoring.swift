@@ -15,6 +15,9 @@ final class FirebaseMonitoring {
     private let db = Firestore.firestore()
 
     /// Device ID stored in Keychain so it persists across app reinstalls.
+    /// Exposed as `publicDeviceID` for use by other components (e.g., FCM registration).
+    lazy var publicDeviceID: String = { deviceID }()
+    
     private lazy var deviceID: String = {
         let service = "com.mbta.monitoring"
         let account = "deviceID"
@@ -51,6 +54,9 @@ final class FirebaseMonitoring {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
         SecItemAdd(addQuery as CFDictionary, nil)
+        
+        // Also save to app group so the widget extension can read it
+        UserDefaults(suiteName: "group.Widgets.MBTA")?.set(newID, forKey: "deviceID")
 
         return newID
     }()
@@ -65,61 +71,19 @@ final class FirebaseMonitoring {
 
     private init() {}
 
-    /// Log MBTA API call to Firestore
+    /// Log MBTA API call to Firestore (daily_stats only — no per-call documents)
     func logAPICall(endpoint: String, statusCode: Int?, responseTimeMs: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "app") {
-        let device = deviceID
-        let data: [String: Any] = [
-            "endpoint": endpoint,
-            "status_code": statusCode as Any,
-            "response_time_ms": responseTimeMs as Any,
-            "route_name": routeName as Any,
-            "direction_name": directionName as Any,
-            "stop_name": stopName as Any,
-            "source": source,
-            "timestamp": Timestamp(date: Date()),
-            "device_id": device
-        ]
-
-        db.collection("api_logs").addDocument(data: data) { error in
-            if let error {
-                print("Firestore log failed for \(endpoint): \(error.localizedDescription)")
-            }
-        }
-
-        // Update daily_stats summary
-        incrementDailyStats(deviceId: device)
+        incrementDailyStats()
     }
 
-    /// Increments total_api_calls for today.
-    /// On the first call from this device_id today, also increments unique_users.
-    private func incrementDailyStats(deviceId: String) {
+    /// Increments total_api_calls for today (1 write, 0 reads).
+    private func incrementDailyStats() {
         let dateKey = dateFormatter.string(from: Date())
         let statsRef = db.collection("daily_stats").document(dateKey)
-        let userRef = db.collection("daily_users").document(dateKey)
-            .collection("users").document(deviceId)
 
-        // Increment total_api_calls (merge-safe, no read required)
         statsRef.setData([
             "date": dateKey,
             "total_api_calls": FieldValue.increment(Int64(1))
         ], merge: true)
-
-        // Transaction: create user doc if missing, increment unique_users only once
-        db.runTransaction({ tx, errorPointer in
-            do {
-                let snap = try tx.getDocument(userRef)
-                if !snap.exists {
-                    tx.setData(["first_seen": Timestamp(date: Date())], forDocument: userRef)
-                    tx.setData(["unique_users": FieldValue.increment(Int64(1))], forDocument: statsRef, merge: true)
-                }
-            } catch {
-                errorPointer?.pointee = error as NSError
-            }
-            return nil
-        }, completion: { _, error in
-            if let error {
-                print("Daily stats transaction failed: \(error.localizedDescription)")
-            }
-        })
     }
 }
