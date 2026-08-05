@@ -1213,8 +1213,8 @@ final class ArrivalsViewModel: ObservableObject {
         liveActivityPollingTask = Task.detached {
             var consecutiveErrors = 0
             while !Task.isCancelled {
-                // Sleep with backoff: 30s normal, up to 2 min on repeated errors
-                let backoffSeconds = min(30 * (1 + consecutiveErrors), 120)
+                // Sleep with backoff: 20s normal, up to 2 min on repeated errors
+                let backoffSeconds = min(20 * (1 + consecutiveErrors), 120)
                 try? await Task.sleep(nanoseconds: UInt64(backoffSeconds) * 1_000_000_000)
                 guard !Task.isCancelled else { break }
                 
