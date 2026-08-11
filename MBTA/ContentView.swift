@@ -67,6 +67,7 @@ struct ContentView: View {
     @State private var isShowingSubwayLines = false
     @State private var isShowingCommuterRailLines = false
     @State private var isShowingRouteAlerts = false
+    @State private var expandedRouteAlertID: String? = nil
     @Environment(\.scenePhase) private var scenePhase
 
     private var showRouteDetails: Bool {
@@ -167,24 +168,75 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isShowingRouteAlerts) {
                 NavigationStack {
-                    List {
-                        if routeAlerts.isEmpty {
-                            Text("No active alerts for this route.")
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(routeAlerts) { alert in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(alert.header)
-                                        .font(.system(size: 14, weight: .semibold))
-                                    if !alert.description.isEmpty {
-                                        Text(alert.description)
-                                            .font(.system(size: 13))
-                                            .foregroundColor(.secondary)
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            if routeAlerts.isEmpty {
+                                Text("No active alerts for this route.")
+                                    .foregroundColor(.secondary)
+                                    .padding(.top, 40)
+                            } else {
+                                ForEach(routeAlerts) { alert in
+                                    let isExpanded = expandedRouteAlertID == alert.id
+                                    
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                            expandedRouteAlertID = isExpanded ? nil : alert.id
+                                        }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            // Header row: effect pill + title + chevron
+                                            HStack(spacing: 8) {
+                                                Text(alertEffectLabel(alert.effect))
+                                                    .font(.system(size: 10, weight: .bold))
+                                                    .foregroundColor(.white)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 3)
+                                                    .background(Capsule().fill(alertEffectColor(alert.effect)))
+                                                
+                                                Text(alert.header)
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundColor(.white)
+                                                    .lineLimit(isExpanded ? nil : 2)
+                                                    .multilineTextAlignment(.leading)
+                                                
+                                                Spacer(minLength: 0)
+                                                
+                                                Image(systemName: "chevron.down")
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .foregroundColor(.white.opacity(0.4))
+                                                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                                            }
+                                            
+                                            // Expanded description
+                                            if isExpanded, !alert.description.isEmpty {
+                                                Text(alert.description)
+                                                    .font(.system(size: 12, weight: .regular))
+                                                    .foregroundColor(.white.opacity(0.6))
+                                                    .padding(.top, 10)
+                                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .fill(Color.white.opacity(0.06))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 14)
+                                                        .stroke(
+                                                            isExpanded
+                                                                ? alertEffectColor(alert.effect).opacity(0.4)
+                                                                : Color.white.opacity(0.08),
+                                                            lineWidth: 1
+                                                        )
+                                                )
+                                        )
                                     }
+                                    .buttonStyle(.plain)
                                 }
-                                .padding(.vertical, 4)
                             }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
                     }
                     .navigationTitle("Route Alerts")
                     .navigationBarTitleDisplayMode(.inline)
@@ -196,6 +248,7 @@ struct ContentView: View {
                 }
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Color(white: 0.08))
+                .onDisappear { expandedRouteAlertID = nil }
             }
             .onChange(of: viewModel.directions) { _, newDirections in
                 // When directions load (route is ready), dismiss any mode selection views
@@ -604,9 +657,49 @@ struct ContentView: View {
     // MARK: - Redesigned Results Section
 
     @ViewBuilder
+    private var inlineAlertPill: some View {
+        if let alert = topRouteAlert {
+            Button {
+                haptic()
+                isShowingRouteAlerts = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(alertEffectLabel(alert.effect))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(alertEffectColor(alert.effect)))
+                    
+                    Text(alert.header)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(1)
+                    
+                    Spacer(minLength: 0)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(alertEffectColor(alert.effect).opacity(0.4), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+    
+    @ViewBuilder
     private var redesignedResultsSection: some View {
         if viewModel.arrivals.isEmpty && !viewModel.isLoadingArrivals {
-            EmptyView()
+            inlineAlertPill
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 // Section title with refresh
@@ -631,6 +724,9 @@ struct ContentView: View {
                 }
                 .blur(radius: isPickingPrediction ? 6 : 0)
                 .allowsHitTesting(!isPickingPrediction)
+                
+                // Inline alert pill (when there's an active alert for this route)
+                inlineAlertPill
 
                 // Arrival cards
                 if viewModel.selectedMode == .commuterRail {
@@ -991,6 +1087,36 @@ struct ContentView: View {
         guard let routeID = viewModel.selectedRoute?.id else { return [] }
         return viewModel.allAlerts.filter { alert in
             alert.routeIDs.contains(routeID)
+        }
+    }
+    
+    /// The highest-severity alert for the current route (suspension > shuttle > closure > delay > others).
+    private var topRouteAlert: MBTAAlert? {
+        routeAlerts.max { a, b in a.severity < b.severity }
+    }
+    
+    private func alertEffectLabel(_ effect: String) -> String {
+        switch effect.uppercased() {
+        case "DELAY": return "DELAY"
+        case "DETOUR": return "DETOUR"
+        case "SUSPENSION": return "SUSPENDED"
+        case "SHUTTLE": return "SHUTTLE"
+        case "STATION_CLOSURE", "STOP_CLOSURE": return "CLOSED"
+        case "STATION_ISSUE": return "ISSUE"
+        case "TRACK_CHANGE": return "TRACK"
+        case "SCHEDULE_CHANGE": return "SCHEDULE"
+        case "STOP_MOVE", "STOP_MOVED": return "MOVED"
+        default: return effect.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+    
+    private func alertEffectColor(_ effect: String) -> Color {
+        switch effect.uppercased() {
+        case "DELAY": return Color(red: 237/255, green: 139/255, blue: 0/255)
+        case "SUSPENSION", "SHUTTLE", "STATION_CLOSURE", "STOP_CLOSURE":
+            return Color(red: 218/255, green: 41/255, blue: 28/255)
+        case "DETOUR": return Color(red: 180/255, green: 130/255, blue: 0/255)
+        default: return Color(white: 0.35)
         }
     }
 

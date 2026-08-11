@@ -259,6 +259,69 @@ final class MBTAService {
         }
     }
     
+    /// Fetch predictions + schedules for commuter rail and merge them.
+    /// Live predictions replace matching scheduled entries; remaining schedules fill in the gaps.
+    func fetchCommuterRailDepartures(stopId: String, routeId: String, directionId: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
+        // Fetch both concurrently
+        async let predictionsTask = fetchPredictions(
+            stopId: stopId, routeId: routeId, directionId: directionId,
+            mode: .commuterRail, routeName: routeName, directionName: directionName, stopName: stopName
+        )
+        async let schedulesTask = fetchSchedules(
+            stopId: stopId, routeId: routeId, directionId: directionId,
+            routeName: routeName, directionName: directionName, stopName: stopName
+        )
+        
+        let predictions = (try? await predictionsTask) ?? []
+        let schedules = (try? await schedulesTask) ?? []
+        
+        // If both are empty, nothing to show
+        if predictions.isEmpty && schedules.isEmpty { return [] }
+        
+        // Start with all predictions (live data, isScheduled = false)
+        var merged = predictions
+        
+        // Add schedules that don't overlap with any prediction (within 2 min tolerance)
+        for schedule in schedules {
+            let schedTime = schedule.departureTime ?? schedule.arrivalTime ?? .distantFuture
+            let hasMatchingPrediction = predictions.contains { prediction in
+                let predTime = prediction.departureTime ?? prediction.arrivalTime ?? .distantPast
+                return abs(predTime.timeIntervalSince(schedTime)) < 120 // 2 min tolerance
+            }
+            if !hasMatchingPrediction {
+                merged.append(schedule)
+            }
+        }
+        
+        // Sort by departure time
+        let now = Date()
+        return merged
+            .sorted { a, b in
+                let aTime = a.departureTime ?? a.arrivalTime ?? .distantFuture
+                let bTime = b.departureTime ?? b.arrivalTime ?? .distantFuture
+                return aTime < bTime
+            }
+            .map { arrival in
+                // Recalculate minutesAway from now
+                let time = arrival.departureTime ?? arrival.arrivalTime ?? Date()
+                let minutes = max(Int(time.timeIntervalSince(now) / 60), 0)
+                return BusArrival(
+                    id: arrival.id,
+                    routeId: arrival.routeId,
+                    routeName: arrival.routeName,
+                    stopId: arrival.stopId,
+                    stopName: arrival.stopName,
+                    arrivalTime: arrival.arrivalTime,
+                    departureTime: arrival.departureTime,
+                    minutesAway: minutes,
+                    stopsAway: arrival.stopsAway,
+                    directionId: arrival.directionId,
+                    status: arrival.status,
+                    isScheduled: arrival.isScheduled
+                )
+            }
+    }
+    
     /// Formats a Date into "HH:mm" for the MBTA schedule filter.
     private func timeString(from date: Date) -> String {
         let formatter = DateFormatter()

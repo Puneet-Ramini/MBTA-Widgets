@@ -785,20 +785,11 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            var predictions = try await MBTAService.shared.fetchPredictions(
-                stopId: stopID,
-                routeId: routeID,
-                directionId: selectedDirectionID,
-                mode: selectedMode,
-                routeName: routeName,
-                directionName: directionName,
-                stopName: stop.name
-            )
+            let predictions: [BusArrival]
             
-            // For commuter rail, fall back to schedules when predictions are empty
-            var usingSchedule = false
-            if predictions.isEmpty && selectedMode == .commuterRail {
-                predictions = try await MBTAService.shared.fetchSchedules(
+            if selectedMode == .commuterRail {
+                // Commuter rail: merge live predictions + schedules
+                predictions = try await MBTAService.shared.fetchCommuterRailDepartures(
                     stopId: stopID,
                     routeId: routeID,
                     directionId: selectedDirectionID,
@@ -806,7 +797,16 @@ final class ArrivalsViewModel: ObservableObject {
                     directionName: directionName,
                     stopName: stop.name
                 )
-                usingSchedule = true
+            } else {
+                predictions = try await MBTAService.shared.fetchPredictions(
+                    stopId: stopID,
+                    routeId: routeID,
+                    directionId: selectedDirectionID,
+                    mode: selectedMode,
+                    routeName: routeName,
+                    directionName: directionName,
+                    stopName: stop.name
+                )
             }
             
             // Commuter rail shows all remaining departures; bus/subway shows top 3
@@ -825,7 +825,7 @@ final class ArrivalsViewModel: ObservableObject {
                     stopsAway: arrival.stopsAway,
                     directionId: arrival.directionId,
                     status: arrival.status,
-                    isScheduled: usingSchedule
+                    isScheduled: arrival.isScheduled
                 )
             }
 
@@ -871,19 +871,10 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            var predictions = try await MBTAService.shared.fetchPredictions(
-                stopId: stopID,
-                routeId: routeID,
-                directionId: selectedDirectionID,
-                mode: selectedMode,
-                routeName: routeName,
-                directionName: directionName,
-                stopName: stop.name
-            )
+            let predictions: [BusArrival]
             
-            var usingSchedule = false
-            if predictions.isEmpty && selectedMode == .commuterRail {
-                predictions = (try? await MBTAService.shared.fetchSchedules(
+            if selectedMode == .commuterRail {
+                predictions = (try? await MBTAService.shared.fetchCommuterRailDepartures(
                     stopId: stopID,
                     routeId: routeID,
                     directionId: selectedDirectionID,
@@ -891,7 +882,16 @@ final class ArrivalsViewModel: ObservableObject {
                     directionName: directionName,
                     stopName: stop.name
                 )) ?? []
-                usingSchedule = true
+            } else {
+                predictions = try await MBTAService.shared.fetchPredictions(
+                    stopId: stopID,
+                    routeId: routeID,
+                    directionId: selectedDirectionID,
+                    mode: selectedMode,
+                    routeName: routeName,
+                    directionName: directionName,
+                    stopName: stop.name
+                )
             }
             
             let limited = selectedMode == .commuterRail ? predictions : Array(predictions.prefix(3))
@@ -909,7 +909,7 @@ final class ArrivalsViewModel: ObservableObject {
                     stopsAway: arrival.stopsAway,
                     directionId: arrival.directionId,
                     status: arrival.status,
-                    isScheduled: usingSchedule
+                    isScheduled: arrival.isScheduled
                 )
             }
 

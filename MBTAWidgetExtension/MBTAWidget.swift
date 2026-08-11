@@ -1636,7 +1636,7 @@ private struct WidgetMBTAService {
             vehiclesByID = [:]
         }
 
-        let predictions = decoded.data
+        var predictions = decoded.data
             .compactMap { prediction -> WidgetArrivalSnapshot? in
                 let attrs = prediction.attributes
                 // Commuter rail: prefer departure time; bus/subway: prefer arrival time
@@ -1662,15 +1662,20 @@ private struct WidgetMBTAService {
                 )
             }
             .sorted { $0.arrivalDate < $1.arrivalDate }
-            .prefix(3)
-            .map { $0 }
         
-        // For commuter rail, fall back to schedules when predictions are empty
-        if predictions.isEmpty && isCommuterRail {
-            return try await fetchSchedules(routeID: routeID, stopID: stopID, directionID: directionID, source: source)
+        // For commuter rail, merge with schedules to fill in non-predicted trips
+        if isCommuterRail {
+            let schedules = (try? await fetchSchedules(routeID: routeID, stopID: stopID, directionID: directionID, source: source)) ?? []
+            for schedule in schedules {
+                let hasMatch = predictions.contains { abs($0.arrivalDate.timeIntervalSince(schedule.arrivalDate)) < 120 }
+                if !hasMatch {
+                    predictions.append(schedule)
+                }
+            }
+            predictions.sort { $0.arrivalDate < $1.arrivalDate }
         }
         
-        return predictions
+        return Array(predictions.prefix(3))
     }
 
     private func fetchVehicles(ids: [String], source: String = "widget") async throws -> [String: Int] {

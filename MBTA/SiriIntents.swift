@@ -157,7 +157,7 @@ enum SiriHelpers {
             let predictionsResponse = try decoder.decode(SiriPredictionsResponse.self, from: data)
 
             let now = Date()
-            let results: [(minutes: Int, time: Date)] = predictionsResponse.data.compactMap { prediction in
+            var results: [(minutes: Int, time: Date)] = predictionsResponse.data.compactMap { prediction in
                 let attrs = prediction.attributes
                 // Commuter rail: prefer departure time
                 let time = isCommuterRail
@@ -170,9 +170,16 @@ enum SiriHelpers {
                 return (minutes: minutes, time: time)
             }
             
-            // Fall back to schedules for commuter rail when no predictions
-            if results.isEmpty && isCommuterRail {
-                return await fetchSchedules(for: favorite)
+            // For commuter rail, merge with schedules to fill in non-predicted trips
+            if isCommuterRail {
+                let schedules = await fetchSchedules(for: favorite)
+                for schedule in schedules {
+                    let hasMatch = results.contains { abs($0.time.timeIntervalSince(schedule.time)) < 120 }
+                    if !hasMatch {
+                        results.append(schedule)
+                    }
+                }
+                results.sort { $0.time < $1.time }
             }
             
             return results
