@@ -914,28 +914,31 @@ final class ArrivalsViewModel: ObservableObject {
             }
 
             // If new data has fewer results, keep old predictions that haven't expired
-            // This prevents the third tile from flashing "--" between refreshes
-            if selectedMode != .commuterRail {
-                let now = Date()
-                if newArrivals.count < arrivals.count {
-                    let newIDs = Set(newArrivals.map(\.id))
-                    for i in newArrivals.count..<arrivals.count {
-                        let old = arrivals[i]
-                        let arrivalTime = old.arrivalTime ?? old.departureTime
-                        if let arrivalTime, arrivalTime > now, !newIDs.contains(old.id) {
-                            newArrivals.append(old)
-                        }
-                    }
-                    newArrivals.sort { a, b in
-                        let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
-                        let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
-                        return aTime < bTime
+            // This prevents tiles from flashing empty between refreshes
+            let now = Date()
+            if newArrivals.count < arrivals.count {
+                let newIDs = Set(newArrivals.map(\.id))
+                for i in newArrivals.count..<arrivals.count {
+                    let old = arrivals[i]
+                    let time = old.departureTime ?? old.arrivalTime
+                    if let time, time > now, !newIDs.contains(old.id) {
+                        newArrivals.append(old)
                     }
                 }
+                newArrivals.sort { a, b in
+                    let aTime = a.departureTime ?? a.arrivalTime ?? .distantFuture
+                    let bTime = b.departureTime ?? b.arrivalTime ?? .distantFuture
+                    return aTime < bTime
+                }
+            }
+            if selectedMode != .commuterRail {
                 newArrivals = Array(newArrivals.prefix(3))
             }
 
-            arrivals = newArrivals
+            // Don't replace with empty if we had data — avoids flicker
+            if !newArrivals.isEmpty || arrivals.isEmpty {
+                arrivals = newArrivals
+            }
         } catch {
             // Silent fail - don't update error message during background refresh
         }

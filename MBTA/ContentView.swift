@@ -699,7 +699,17 @@ struct ContentView: View {
     @ViewBuilder
     private var redesignedResultsSection: some View {
         if viewModel.arrivals.isEmpty && !viewModel.isLoadingArrivals {
-            inlineAlertPill
+            VStack(alignment: .leading, spacing: 12) {
+                inlineAlertPill
+                
+                if viewModel.errorMessage == nil && viewModel.selectedStopID != nil {
+                    Text(viewModel.selectedMode == .commuterRail
+                         ? "No scheduled departures found for this station."
+                         : "No upcoming arrivals found for this stop.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 // Section title with refresh
