@@ -10,10 +10,6 @@ import AppIntents
 
 
 struct MoreView: View {
-    @State private var isShowingWhatItDoes = false
-    @State private var isShowingAboutApp = false
-
-
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
@@ -30,55 +26,16 @@ struct MoreView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // What the app does (expandable)
-                    expandableTile(
-                        icon: "list.bullet.clipboard",
-                        iconColor: .blue,
-                        title: "What the app does",
-                        isExpanded: $isShowingWhatItDoes
-                    ) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("• Real-time MBTA arrivals for buses, trains, and subway lines")
-                            Text("• Home Screen widgets for quick access")
-                            Text("• Lock Screen and Live Activity support with Dynamic Island updates")
-                            Text("• Live previews so you can see exactly how your widget will look")
-                            Text("• Save your favorite routes and stops")
-                            Text("• Time-based widgets that change throughout the day")
+                    // About this app
+                    Button {
+                        haptic()
+                        if let url = URL(string: "https://mbta-widgets.web.app") {
+                            UIApplication.shared.open(url)
                         }
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.55))
-
-                        Text("Why it exists:")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.top, 8)
-
-                        Text("This app is designed for commuters who want fast, reliable information with zero friction. No clutter, no extra steps — just the data you need.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.55))
-
-                        Text("Data source:")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.top, 8)
-
-                        Text("All transit data is provided by the official MBTA public API.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.55))
+                    } label: {
+                        tileRow(icon: "app.fill", iconColor: .green, title: "About this app", trailing: .external)
                     }
-
-                    // About this app (expandable)
-                    expandableTile(
-                        icon: "app.fill",
-                        iconColor: .green,
-                        title: "About this app",
-                        isExpanded: $isShowingAboutApp
-                    ) {
-                        Text("MBTA Widgets is built to make your daily commute easier by showing real-time bus and train arrivals directly on your iPhone without needing to open an app. Just glance at your Home Screen, Lock Screen, or Dynamic Island and instantly know when your next ride is coming.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.55))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    .buttonStyle(.plain)
 
                     // Share Feedback
                     Button {
@@ -94,7 +51,7 @@ struct MoreView: View {
                     // Privacy Policy
                     Button {
                         haptic()
-                        if let url = URL(string: "https://mbta-widgets.web.app") {
+                        if let url = URL(string: "https://mbta-widgets.web.app/privacy.html") {
                             UIApplication.shared.open(url)
                         }
                     } label: {
@@ -197,58 +154,6 @@ struct MoreView: View {
         )
     }
 
-    private func expandableTile<Content: View>(
-        icon: String,
-        iconColor: Color,
-        title: String,
-        isExpanded: Binding<Bool>,
-        @ViewBuilder content: @escaping () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                haptic()
-                withAnimation(.spring(response: 0.3)) {
-                    isExpanded.wrappedValue.toggle()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: icon)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(iconColor)
-                        .frame(width: 28, height: 28)
-
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.3))
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                }
-                .padding(14)
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded.wrappedValue {
-                VStack(alignment: .leading, spacing: 0) {
-                    content()
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(white: 0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color(white: 0.20), lineWidth: 1)
-                )
-        )
-    }
 }
 
 #Preview {
