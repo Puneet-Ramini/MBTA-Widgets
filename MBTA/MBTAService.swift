@@ -137,10 +137,14 @@ final class MBTAService {
     }
 
     /// Fetch predictions for a stop, optionally filtered by route and direction.
-    func fetchPredictions(stopId: String, routeId: String?, directionId: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
+    /// For commuter rail, prefers departure times; for bus/subway, prefers arrival times.
+    func fetchPredictions(stopId: String, routeId: String?, directionId: Int? = nil, mode: TransportMode = .bus, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
+        let isCommuterRail = mode == .commuterRail
+        let sortField = isCommuterRail ? "departure_time" : "arrival_time"
+        
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "filter[stop]", value: stopId),
-            URLQueryItem(name: "sort", value: "arrival_time")
+            URLQueryItem(name: "sort", value: sortField)
         ]
 
         if let routeId, !routeId.isEmpty {
@@ -159,7 +163,11 @@ final class MBTAService {
 
         return response.data.compactMap { prediction in
             let attributes = prediction.attributes
-            let time = attributes.arrivalTime ?? attributes.departureTime
+            // Commuter rail: prefer departure (when the train leaves the station)
+            // Bus/subway: prefer arrival (when the vehicle reaches the stop)
+            let time = isCommuterRail
+                ? (attributes.departureTime ?? attributes.arrivalTime)
+                : (attributes.arrivalTime ?? attributes.departureTime)
 
             guard let time, time >= now else {
                 return nil
@@ -189,10 +197,73 @@ final class MBTAService {
             )
         }
         .sorted { left, right in
-            let leftTime = left.arrivalTime ?? left.departureTime ?? .distantFuture
-            let rightTime = right.arrivalTime ?? right.departureTime ?? .distantFuture
+            let leftTime = isCommuterRail
+                ? (left.departureTime ?? left.arrivalTime ?? .distantFuture)
+                : (left.arrivalTime ?? left.departureTime ?? .distantFuture)
+            let rightTime = isCommuterRail
+                ? (right.departureTime ?? right.arrivalTime ?? .distantFuture)
+                : (right.arrivalTime ?? right.departureTime ?? .distantFuture)
             return leftTime < rightTime
         }
+    }
+    
+    /// Fetch scheduled departures for a stop (used as fallback when predictions are empty).
+    /// Returns remaining departures for the current day.
+    func fetchSchedules(stopId: String, routeId: String, directionId: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil) async throws -> [BusArrival] {
+        let now = Date()
+        let calendar = Calendar.current
+        let endOfDay = calendar.startOfDay(for: now).addingTimeInterval(86400)
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "filter[stop]", value: stopId),
+            URLQueryItem(name: "filter[route]", value: routeId),
+            URLQueryItem(name: "filter[min_time]", value: timeString(from: now)),
+            URLQueryItem(name: "filter[max_time]", value: timeString(from: endOfDay)),
+            URLQueryItem(name: "sort", value: "departure_time")
+        ]
+        
+        if let directionId {
+            queryItems.append(URLQueryItem(name: "filter[direction_id]", value: String(directionId)))
+        }
+        
+        let url = try buildURL(path: "schedules", queryItems: queryItems)
+        let response = try await fetch(SchedulesResponse.self, from: url, routeName: routeName, directionName: directionName, stopName: stopName)
+        
+        return response.data.compactMap { schedule in
+            let attributes = schedule.attributes
+            let time = attributes.departureTime ?? attributes.arrivalTime
+            
+            guard let time, time >= now, time <= endOfDay else {
+                return nil
+            }
+            
+            let minutesAway = max(Int(time.timeIntervalSince(now) / 60), 0)
+            
+            return BusArrival(
+                id: schedule.id,
+                routeId: schedule.relationships?.route?.data?.id ?? routeId,
+                routeName: schedule.relationships?.route?.data?.id ?? routeId,
+                stopId: schedule.relationships?.stop?.data?.id ?? stopId,
+                stopName: "",
+                arrivalTime: attributes.arrivalTime,
+                departureTime: attributes.departureTime,
+                minutesAway: minutesAway,
+                stopsAway: nil,
+                directionId: attributes.directionId,
+                status: nil,
+                isScheduled: true
+            )
+        }
+    }
+    
+    /// Formats a Date into "HH:mm" for the MBTA schedule filter.
+    private func timeString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 
     private func fetchVehicles(ids: [String]) async throws -> [String: Int] {

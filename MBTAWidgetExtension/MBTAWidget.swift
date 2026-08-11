@@ -263,20 +263,26 @@ struct MBTAWidgetProvider: TimelineProvider {
         let now = Date()
         let entries = buildEntries(from: state, startingAt: now)
         
-        // iOS limits widget refreshes to ~15 min minimum in practice
-        // Request 1 minute but expect iOS to throttle to 15+ minutes
-        let refreshDate = now.addingTimeInterval(60)
+        // Refresh at the next override boundary so the widget switches routes on time,
+        // or fall back to 1 minute (iOS throttles to ~15 min minimum in practice).
+        let refreshDate = Self.nextOverrideBoundary(after: now, forSlot: "Wide Widget")
+            ?? now.addingTimeInterval(60)
         
         return Timeline(entries: entries, policy: .after(refreshDate))
     }
 
     private func loadState() async -> WidgetContentState {
-        // First check if there's a widget assignment for the medium widget
+        // 1. Check time-based overrides first (they take priority when active)
+        if let overrideFavorite = Self.loadTimeOverrideFavorite(forSlot: "Wide Widget") {
+            return await loadStateForFavorite(overrideFavorite)
+        }
+        
+        // 2. Fall back to widget assignment
         if let assignedFavorite = loadAssignedFavorite(widgetKey: "mediumWidgetFavoriteIndex") {
             return await loadStateForFavorite(assignedFavorite)
         }
         
-        // Fall back to the selection method (default or time-based override)
+        // 3. Fall back to the selection method (default config or legacy keys)
         guard let selection = StoredWidgetSelection.load() else {
             return WidgetContentState(
                 mode: .bus,
@@ -327,6 +333,53 @@ struct MBTAWidgetProvider: TimelineProvider {
                 message: "Could not load bus times."
             )
         }
+    }
+    
+    /// Returns the next time an override for this slot starts or ends, so the timeline
+    /// can refresh exactly when the active route should change.
+    fileprivate static func nextOverrideBoundary(after date: Date, forSlot slot: String) -> Date? {
+        guard
+            let defaults = UserDefaults(suiteName: "group.Widgets.MBTA"),
+            let data = defaults.data(forKey: "widget.configuration"),
+            let configuration = try? JSONDecoder().decode(WidgetStoredConfiguration.self, from: data)
+        else {
+            return nil
+        }
+        let calendar = Calendar.current
+        let slotOverrides = configuration.overrides.filter { $0.widgetSlot == slot }
+        guard !slotOverrides.isEmpty else { return nil }
+
+        var candidates: [Date] = []
+        for override in slotOverrides {
+            // Build today's start and end dates
+            if let start = calendar.date(bySettingHour: override.startHour, minute: override.startMinute, second: 0, of: date),
+               start > date {
+                candidates.append(start)
+            }
+            if let end = calendar.date(bySettingHour: override.endHour, minute: override.endMinute, second: 0, of: date),
+               end > date {
+                candidates.append(end)
+            }
+            // Also check tomorrow's start in case we're past today's boundaries
+            if let tomorrowStart = calendar.date(bySettingHour: override.startHour, minute: override.startMinute, second: 0, of: date),
+               let nextDay = calendar.date(byAdding: .day, value: 1, to: tomorrowStart),
+               nextDay > date {
+                candidates.append(nextDay)
+            }
+        }
+        return candidates.min()
+    }
+
+    /// Checks if there's an active time-based override for the given widget slot.
+    fileprivate static func loadTimeOverrideFavorite(forSlot slot: String) -> WidgetStoredFavorite? {
+        guard
+            let defaults = UserDefaults(suiteName: "group.Widgets.MBTA"),
+            let data = defaults.data(forKey: "widget.configuration"),
+            let configuration = try? JSONDecoder().decode(WidgetStoredConfiguration.self, from: data)
+        else {
+            return nil
+        }
+        return configuration.activeFavorite(at: Date(), forSlot: slot)
     }
     
     private func loadAssignedFavorite(widgetKey: String) -> WidgetStoredFavorite? {
@@ -448,6 +501,9 @@ struct MBTAWidgetProvider: TimelineProvider {
 struct MBTAWidgetEntryView: View {
     var entry: MBTAWidgetProvider.Entry
     @Environment(\.widgetRenderingMode) var renderingMode
+    
+    private var isAccented: Bool { renderingMode == .accented }
+    private let mbtaBlue = Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -456,11 +512,12 @@ struct MBTAWidgetEntryView: View {
                 Text(entry.badgeKey.displayRouteName)
                     .font(.headline)
                     .bold()
-                    .foregroundColor(entry.badgeKey.routeTextColor)
+                    .foregroundColor(isAccented ? .primary : entry.badgeKey.routeTextColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(entry.badgeKey.routeBadgeColor)
+                    .background(isAccented ? Color.primary.opacity(0.2) : entry.badgeKey.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .widgetAccentable()
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.directionLine)
@@ -484,10 +541,11 @@ struct MBTAWidgetEntryView: View {
                         VStack(spacing: 3) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
+                                .foregroundColor(isAccented ? .primary : .white)
                                 .frame(width: 30, height: 30)
-                                .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                .background(isAccented ? Color.primary.opacity(0.2) : mbtaBlue)
                                 .clipShape(Circle())
+                                .widgetAccentable()
                             Text(entry.date, style: .time)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundColor(.secondary)
@@ -522,12 +580,13 @@ struct MBTAWidgetEntryView: View {
                             Text(prediction.formattedMinutes(from: entry.date))
                                 .font(.subheadline)
                                 .fontWeight(.bold)
-                                .foregroundColor(.white)
+                                .foregroundColor(isAccented ? .primary : .white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
                                 .padding(.horizontal, 6)
-                                .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                .background(isAccented ? Color.primary.opacity(0.15) : mbtaBlue)
                                 .clipShape(Capsule())
+                                .widgetAccentable()
 
                             Text(prediction.arrivalTimeText.isEmpty ? " " : prediction.arrivalTimeText)
                                 .font(.caption2)
@@ -548,11 +607,11 @@ struct MBTAWidgetEntryView: View {
                                 Text("--")
                                     .font(.subheadline)
                                     .fontWeight(.bold)
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .foregroundColor(isAccented ? .primary.opacity(0.5) : .white.opacity(0.85))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
                                     .padding(.horizontal, 6)
-                                    .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                    .background(isAccented ? Color.primary.opacity(0.1) : mbtaBlue)
                                     .clipShape(Capsule())
 
                                 Text(" ")
@@ -712,15 +771,23 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
         let now = Date()
         let entries = buildEntries(from: state, startingAt: now)
         
-        // iOS limits widget refreshes to ~15 min minimum in practice
-        // Request 1 minute but expect iOS to throttle to 15+ minutes
-        let refreshDate = now.addingTimeInterval(60)
+        // Refresh at the next override boundary so the widget switches routes on time,
+        // or fall back to 1 minute (iOS throttles to ~15 min minimum in practice).
+        let slotName = favoriteIndex == 0 ? "Small Widget 1" : "Small Widget 2"
+        let refreshDate = MBTAWidgetProvider.nextOverrideBoundary(after: now, forSlot: slotName)
+            ?? now.addingTimeInterval(60)
         
         return Timeline(entries: entries, policy: .after(refreshDate))
     }
     
     private func loadState() async -> WidgetContentState {
-        // Check for widget assignment first
+        // 1. Check time-based overrides first (they take priority when active)
+        let slotName = favoriteIndex == 0 ? "Small Widget 1" : "Small Widget 2"
+        if let overrideFavorite = MBTAWidgetProvider.loadTimeOverrideFavorite(forSlot: slotName) {
+            return await loadStateForFavorite(overrideFavorite)
+        }
+        
+        // 2. Fall back to widget assignment
         let widgetKey: String
         if favoriteIndex == 0 {
             widgetKey = "smallWidget1FavoriteIndex"
@@ -733,7 +800,7 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
             return await loadStateForFavorite(favorite)
         }
         
-        // Fall back to direct favorite index
+        // 3. Fall back to direct favorite index
         guard let favorite = loadFavorite(at: favoriteIndex) else {
             return WidgetContentState(
                 mode: .bus,
@@ -862,6 +929,10 @@ struct SmallFavoriteWidgetProvider: TimelineProvider {
 
 struct SmallFavoriteWidgetView: View {
     var entry: MBTAWidgetEntry
+    @Environment(\.widgetRenderingMode) var renderingMode
+    
+    private var isAccented: Bool { renderingMode == .accented }
+    private let mbtaBlue = Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255)
     
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -869,11 +940,12 @@ struct SmallFavoriteWidgetView: View {
                 // Route badge
                 Text(entry.badgeKey.displayRouteName)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(entry.badgeKey.routeTextColor)
+                    .foregroundColor(isAccented ? .primary : entry.badgeKey.routeTextColor)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
-                    .background(entry.badgeKey.routeBadgeColor)
+                    .background(isAccented ? Color.primary.opacity(0.2) : entry.badgeKey.routeBadgeColor)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .widgetAccentable()
                 
                 Spacer()
                 
@@ -883,10 +955,11 @@ struct SmallFavoriteWidgetView: View {
                         VStack(spacing: 2) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
+                                .foregroundColor(isAccented ? .primary : .white)
                                 .frame(width: 22, height: 22)
-                                .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                                .background(isAccented ? Color.primary.opacity(0.2) : mbtaBlue)
                                 .clipShape(Circle())
+                                .widgetAccentable()
                             Text(entry.date, style: .time)
                                 .font(.system(size: 8, weight: .medium))
                                 .foregroundColor(.secondary)
@@ -932,21 +1005,22 @@ struct SmallFavoriteWidgetView: View {
                     ForEach(Array(entry.predictions.prefix(2).enumerated()), id: \.offset) { index, prediction in
                         Text(prediction.formattedMinutes(from: entry.date))
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(isAccented ? .primary : .white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
-                            .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                            .background(isAccented ? Color.primary.opacity(0.15) : mbtaBlue)
                             .clipShape(Capsule())
+                            .widgetAccentable()
                     }
                     
                     // Fill remaining slots
                     ForEach(entry.predictions.count..<2, id: \.self) { _ in
                         Text("--")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(isAccented ? .primary.opacity(0.5) : .white.opacity(0.85))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
-                            .background(Color(red: 0 / 255, green: 57 / 255, blue: 166 / 255))
+                            .background(isAccented ? Color.primary.opacity(0.1) : mbtaBlue)
                             .clipShape(Capsule())
                     }
                 }
@@ -1019,6 +1093,7 @@ struct MBTAWidgetBundle: WidgetBundle {
     }
 }
 
+// ⛔️ DO NOT MODIFY ANYTHING BELOW THIS LINE UNTIL #endif — Live Activity / Dynamic Island code. It is sealed and working. Any changes risk breaking it.
 // MARK: - Live Activity
 #if canImport(ActivityKit)
 @available(iOS 16.2, *)
@@ -1239,9 +1314,9 @@ private struct StoredWidgetSelection {
             return nil
         }
 
-        let now = Date()
-        let activeFavorite = configuration.activeFavorite(at: now) ?? configuration.defaultFavorite
-        guard let favorite = activeFavorite else {
+        // Time overrides are handled earlier with slot filtering;
+        // this path only returns the default favorite.
+        guard let favorite = configuration.defaultFavorite else {
             return nil
         }
 
@@ -1476,15 +1551,35 @@ private struct WidgetVehicleAttributes: Decodable {
     }
 }
 
+private struct WidgetSchedulesResponse: Decodable {
+    let data: [WidgetScheduleData]
+}
+
+private struct WidgetScheduleData: Decodable {
+    let id: String
+    let attributes: WidgetScheduleAttributes
+}
+
+private struct WidgetScheduleAttributes: Decodable {
+    let arrivalTime: Date?
+    let departureTime: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case arrivalTime = "arrival_time"
+        case departureTime = "departure_time"
+    }
+}
+
 private struct WidgetMBTAService {
     private let apiKey = "6aaf4b37ca464bc298e7573999c87d4d"
 
     func fetchPredictions(mode: WidgetTransportMode, routeID: String, stopID: String, directionID: Int? = nil, routeName: String? = nil, directionName: String? = nil, stopName: String? = nil, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
+        let isCommuterRail = mode == .commuterRail
         var components = URLComponents(string: "https://api-v3.mbta.com/predictions")!
         components.queryItems = [
             URLQueryItem(name: "filter[route]", value: routeID),
             URLQueryItem(name: "filter[stop]", value: stopID),
-            URLQueryItem(name: "sort", value: "arrival_time"),
+            URLQueryItem(name: "sort", value: isCommuterRail ? "departure_time" : "arrival_time"),
             URLQueryItem(name: "api_key", value: apiKey)
         ]
         if let directionID {
@@ -1541,13 +1636,15 @@ private struct WidgetMBTAService {
             vehiclesByID = [:]
         }
 
-        return decoded.data
-            .compactMap { prediction in
-                guard let date = prediction.attributes.arrivalTime ?? prediction.attributes.departureTime else {
-                    return nil
-                }
-
-                guard date >= now else {
+        let predictions = decoded.data
+            .compactMap { prediction -> WidgetArrivalSnapshot? in
+                let attrs = prediction.attributes
+                // Commuter rail: prefer departure time; bus/subway: prefer arrival time
+                let date = isCommuterRail
+                    ? (attrs.departureTime ?? attrs.arrivalTime)
+                    : (attrs.arrivalTime ?? attrs.departureTime)
+                
+                guard let date, date >= now else {
                     return nil
                 }
 
@@ -1558,7 +1655,7 @@ private struct WidgetMBTAService {
                 return WidgetArrivalSnapshot(
                     arrivalDate: date,
                     stopsAwayText: formatStopsAway(
-                        targetStopSequence: prediction.attributes.stopSequence,
+                        targetStopSequence: attrs.stopSequence,
                         currentStopSequence: currentStopSequence,
                         minutesAway: minutesAway
                     )
@@ -1567,6 +1664,13 @@ private struct WidgetMBTAService {
             .sorted { $0.arrivalDate < $1.arrivalDate }
             .prefix(3)
             .map { $0 }
+        
+        // For commuter rail, fall back to schedules when predictions are empty
+        if predictions.isEmpty && isCommuterRail {
+            return try await fetchSchedules(routeID: routeID, stopID: stopID, directionID: directionID, source: source)
+        }
+        
+        return predictions
     }
 
     private func fetchVehicles(ids: [String], source: String = "widget") async throws -> [String: Int] {
@@ -1638,6 +1742,53 @@ private struct WidgetMBTAService {
         }
 
         return "\(stopsAway) stops away"
+    }
+    
+    /// Fetch scheduled departures as fallback when predictions are empty (commuter rail).
+    func fetchSchedules(routeID: String, stopID: String, directionID: Int? = nil, source: String = "widget") async throws -> [WidgetArrivalSnapshot] {
+        let now = Date()
+        let calendar = Calendar.current
+        let endOfDay = calendar.startOfDay(for: now).addingTimeInterval(86400)
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        
+        var components = URLComponents(string: "https://api-v3.mbta.com/schedules")!
+        components.queryItems = [
+            URLQueryItem(name: "filter[route]", value: routeID),
+            URLQueryItem(name: "filter[stop]", value: stopID),
+            URLQueryItem(name: "filter[min_time]", value: formatter.string(from: now)),
+            URLQueryItem(name: "filter[max_time]", value: formatter.string(from: endOfDay)),
+            URLQueryItem(name: "sort", value: "departure_time"),
+            URLQueryItem(name: "api_key", value: apiKey)
+        ]
+        if let directionID {
+            components.queryItems?.append(
+                URLQueryItem(name: "filter[direction_id]", value: String(directionID))
+            )
+        }
+        
+        guard let url = components.url else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        WidgetAPIUsageStore.record(url: url, statusCode: (response as? HTTPURLResponse)?.statusCode, source: source)
+        
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WidgetSchedulesResponse.self, from: data)
+        
+        return decoded.data
+            .compactMap { schedule -> WidgetArrivalSnapshot? in
+                let time = schedule.attributes.departureTime ?? schedule.attributes.arrivalTime
+                guard let time, time >= now, time <= endOfDay else { return nil }
+                return WidgetArrivalSnapshot(arrivalDate: time, stopsAwayText: "")
+            }
+            .sorted { $0.arrivalDate < $1.arrivalDate }
+            .prefix(3)
+            .map { $0 }
     }
 }
 

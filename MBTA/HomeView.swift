@@ -116,26 +116,7 @@ struct HomeView: View {
             onExploreRoutes?()
         } label: {
             ZStack(alignment: .leading) {
-                // Background image shifted right so map is visible on right half
-                GeometryReader { geo in
-                    Image("RouteMapBackground")
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .offset(x: geo.size.width * 0.25) // push image to the right
-                        .clipped()
-                }
-                
-                // Dark gradient overlay for readability — heavier on left for text
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.black.opacity(0.92), location: 0),
-                        .init(color: Color.black.opacity(0.6), location: 0.45),
-                        .init(color: Color.black.opacity(0.2), location: 1.0)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
+                ExploreCardBackground()
                 
                 // Content
                 VStack(alignment: .leading, spacing: 12) {
@@ -460,6 +441,42 @@ struct HomeView: View {
             return .black
         }
         return .white
+    }
+}
+
+// MARK: - Explore Card Background
+
+private struct ExploreCardBackground: View {
+    // MBTA line colors
+    private let mbtaRed    = Color(red: 0xDA/255, green: 0x29/255, blue: 0x1C/255)
+    private let mbtaOrange = Color(red: 0xED/255, green: 0x8B/255, blue: 0x00/255)
+    private let mbtaBlue   = Color(red: 0x00/255, green: 0x3D/255, blue: 0xA5/255)
+    private let mbtaGreen  = Color(red: 0x00/255, green: 0x84/255, blue: 0x3D/255)
+    private let dark       = Color(red: 0x0A/255, green: 0x0A/255, blue: 0x0B/255)
+
+    var body: some View {
+        ZStack {
+            MeshGradient(width: 3, height: 3, points: [
+                .init(0, 0),   .init(0.5, 0),   .init(1, 0),
+                .init(0, 0.5), .init(0.5, 0.5), .init(1, 0.5),
+                .init(0, 1),   .init(0.5, 1),   .init(1, 1)
+            ], colors: [
+                mbtaRed,  dark,       mbtaOrange,
+                dark,     dark,       dark,
+                mbtaGreen, dark,      mbtaBlue
+            ])
+            .blur(radius: 40)
+            .scaleEffect(1.3)
+
+            // Leading scrim so headline sits on solid black
+            LinearGradient(
+                colors: [.black, .black.opacity(0.1)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .allowsHitTesting(false)
     }
 }
 

@@ -514,6 +514,7 @@ struct TimeOverrideSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var expandedOverrideID: String? = nil
     @State private var editingFavoriteForID: String? = nil
+    @State private var pendingOverrideFavorite: SavedFavorite? = nil
 
     private var savedFavorites: [SavedFavorite] {
         viewModel.quickFavorites.compactMap { $0 }
@@ -744,18 +745,24 @@ struct TimeOverrideSheet: View {
                             .foregroundColor(.white.opacity(0.35))
                             .tracking(0.8)
                             .padding(.horizontal, 14)
+                        
+                        Text("Your widget's default route stays the same. The route you pick here will override it during the scheduled time.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.35))
+                            .padding(.horizontal, 14)
 
                         if editingFavoriteForID == override.id {
                             // Show favorite list
                             VStack(spacing: 6) {
                                 ForEach(Array(viewModel.quickFavorites.enumerated()), id: \.offset) { index, favorite in
                                     if let fav = favorite {
+                                        let isSelected = pendingOverrideFavorite?.routeID == fav.routeID &&
+                                            pendingOverrideFavorite?.directionID == fav.directionID &&
+                                            pendingOverrideFavorite?.stopID == fav.stopID
+
                                         Button {
                                             haptic()
-                                            viewModel.updateWidgetOverrideFavorite(id: override.id, favorite: fav)
-                                            withAnimation(.spring(response: 0.25)) {
-                                                editingFavoriteForID = nil
-                                            }
+                                            pendingOverrideFavorite = fav
                                         } label: {
                                             HStack(spacing: 10) {
                                                 routeBadge(for: fav)
@@ -772,9 +779,7 @@ struct TimeOverrideSheet: View {
 
                                                 Spacer()
 
-                                                if override.favorite?.routeID == fav.routeID &&
-                                                   override.favorite?.directionID == fav.directionID &&
-                                                   override.favorite?.stopID == fav.stopID {
+                                                if isSelected {
                                                     Image(systemName: "checkmark")
                                                         .font(.system(size: 13, weight: .bold))
                                                         .foregroundColor(.blue)
@@ -783,12 +788,40 @@ struct TimeOverrideSheet: View {
                                             .padding(10)
                                             .background(
                                                 RoundedRectangle(cornerRadius: 10)
-                                                    .fill(Color(white: 0.12))
+                                                    .fill(Color(white: isSelected ? 0.16 : 0.12))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 10)
+                                                            .stroke(isSelected ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1)
+                                                    )
                                             )
                                         }
                                         .buttonStyle(.plain)
                                     }
                                 }
+                                
+                                // Save button
+                                Button {
+                                    haptic(.medium)
+                                    if let fav = pendingOverrideFavorite {
+                                        viewModel.updateWidgetOverrideFavorite(id: override.id, favorite: fav)
+                                    }
+                                    withAnimation(.spring(response: 0.25)) {
+                                        editingFavoriteForID = nil
+                                        pendingOverrideFavorite = nil
+                                    }
+                                } label: {
+                                    Text("Save")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(pendingOverrideFavorite != nil ? Color.blue : Color.blue.opacity(0.3))
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(pendingOverrideFavorite == nil)
                             }
                             .padding(.horizontal, 14)
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -796,6 +829,8 @@ struct TimeOverrideSheet: View {
                             // Show current selection, tappable to change
                             Button {
                                 haptic()
+                                // Pre-select the current favorite when opening the picker
+                                pendingOverrideFavorite = override.favorite
                                 withAnimation(.spring(response: 0.25)) {
                                     editingFavoriteForID = override.id
                                 }

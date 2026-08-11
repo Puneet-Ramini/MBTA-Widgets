@@ -118,6 +118,22 @@ struct BusArrival: Identifiable {
     let stopsAway: Int?
     let directionId: Int?
     let status: String?
+    let isScheduled: Bool
+    
+    init(id: String, routeId: String, routeName: String, stopId: String, stopName: String, arrivalTime: Date?, departureTime: Date?, minutesAway: Int?, stopsAway: Int?, directionId: Int?, status: String?, isScheduled: Bool = false) {
+        self.id = id
+        self.routeId = routeId
+        self.routeName = routeName
+        self.stopId = stopId
+        self.stopName = stopName
+        self.arrivalTime = arrivalTime
+        self.departureTime = departureTime
+        self.minutesAway = minutesAway
+        self.stopsAway = stopsAway
+        self.directionId = directionId
+        self.status = status
+        self.isScheduled = isScheduled
+    }
 }
 
 struct BusStop: Identifiable {
@@ -335,4 +351,43 @@ struct MBTAAlert: Identifiable {
     let serviceEffect: String
     let routeIDs: [String]
     let updatedAt: String
+}
+
+// MARK: - Schedule API Models
+
+struct SchedulesResponse: Codable {
+    let data: [ScheduleData]
+}
+
+struct ScheduleData: Codable {
+    let id: String
+    let attributes: ScheduleAttributes
+    let relationships: ScheduleRelationships?
+}
+
+struct ScheduleAttributes: Codable {
+    let arrivalTime: Date?
+    let departureTime: Date?
+    let directionId: Int?
+    let stopSequence: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case arrivalTime = "arrival_time"
+        case departureTime = "departure_time"
+        case directionId = "direction_id"
+        case stopSequence = "stop_sequence"
+    }
+}
+
+struct ScheduleRelationships: Codable {
+    let route: ScheduleRelationship?
+    let stop: ScheduleRelationship?
+}
+
+struct ScheduleRelationship: Codable {
+    let data: ScheduleRelationshipData?
+}
+
+struct ScheduleRelationshipData: Codable {
+    let id: String
 }

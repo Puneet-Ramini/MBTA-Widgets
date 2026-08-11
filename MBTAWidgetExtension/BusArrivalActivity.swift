@@ -1,3 +1,4 @@
+// ⛔️ DO NOT MODIFY THIS FILE — Live Activity / Dynamic Island code. It is sealed and working. Any changes risk breaking it.
 import ActivityKit
 import SwiftUI
 

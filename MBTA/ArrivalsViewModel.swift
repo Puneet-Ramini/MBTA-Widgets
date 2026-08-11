@@ -202,6 +202,7 @@ final class ArrivalsViewModel: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var currentActivity: Any? = nil
     @Published var allBusRoutes: [Route] = []
+    // ⛔️ DO NOT MODIFY the Live Activity properties or methods below — sealed and working. Any changes risk breaking Live Activity / Dynamic Island.
     /// The direction ID used for the active Live Activity, so we can filter predictions correctly
     private var liveActivityDirectionID: Int? = nil
     
@@ -432,19 +433,30 @@ final class ArrivalsViewModel: ObservableObject {
             return nil
         }
         
-        // Try widget assignments first
+        // 1. Check time-based overrides first (they take priority when active)
+        if let configData = defaults.data(forKey: "widget.configuration"),
+           let configuration = try? JSONDecoder().decode(WidgetConfiguration.self, from: configData) {
+            let now = Date()
+            // Check overrides for the wide widget slot (medium widget is what opens the app)
+            let wideOverride = configuration.overrides
+                .filter { $0.widgetSlot == .wide }
+                .first(where: { isOverrideActive($0, at: now) })?.favorite
+            if let override = wideOverride {
+                return override
+            }
+        }
+        
+        // 2. Fall back to widget assignments
         if let mediumIndex = defaults.object(forKey: "mediumWidgetFavoriteIndex") as? Int,
            quickFavorites.indices.contains(mediumIndex),
            let favorite = quickFavorites[mediumIndex] {
             return favorite
         }
         
-        // Fall back to widget configuration (default or time-based)
+        // 3. Fall back to widget configuration default
         if let configData = defaults.data(forKey: "widget.configuration"),
            let configuration = try? JSONDecoder().decode(WidgetConfiguration.self, from: configData) {
-            let now = Date()
-            return configuration.overrides.first(where: { isOverrideActive($0, at: now) })?.favorite 
-                ?? configuration.defaultFavorite
+            return configuration.defaultFavorite
         }
         
         return nil
@@ -773,16 +785,34 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let predictions = try await MBTAService.shared.fetchPredictions(
+            var predictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
                 directionId: selectedDirectionID,
+                mode: selectedMode,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
+            
+            // For commuter rail, fall back to schedules when predictions are empty
+            var usingSchedule = false
+            if predictions.isEmpty && selectedMode == .commuterRail {
+                predictions = try await MBTAService.shared.fetchSchedules(
+                    stopId: stopID,
+                    routeId: routeID,
+                    directionId: selectedDirectionID,
+                    routeName: routeName,
+                    directionName: directionName,
+                    stopName: stop.name
+                )
+                usingSchedule = true
+            }
+            
+            // Commuter rail shows all remaining departures; bus/subway shows top 3
+            let limited = selectedMode == .commuterRail ? predictions : Array(predictions.prefix(3))
 
-            arrivals = Array(predictions.prefix(3)).map { arrival in
+            arrivals = limited.map { arrival in
                 BusArrival(
                     id: arrival.id,
                     routeId: arrival.routeId,
@@ -794,12 +824,15 @@ final class ArrivalsViewModel: ObservableObject {
                     minutesAway: arrival.minutesAway,
                     stopsAway: arrival.stopsAway,
                     directionId: arrival.directionId,
-                    status: arrival.status
+                    status: arrival.status,
+                    isScheduled: usingSchedule
                 )
             }
 
             if arrivals.isEmpty {
-                errorMessage = "No upcoming arrivals found for this stop."
+                errorMessage = selectedMode == .commuterRail
+                    ? "No scheduled departures found for this station."
+                    : "No upcoming arrivals found for this stop."
             }
             
             // Reload widgets immediately when user loads arrivals
@@ -838,16 +871,32 @@ final class ArrivalsViewModel: ObservableObject {
             let direction = directions.first { $0.id == selectedDirectionID }
             let directionName = direction?.name
             
-            let predictions = try await MBTAService.shared.fetchPredictions(
+            var predictions = try await MBTAService.shared.fetchPredictions(
                 stopId: stopID,
                 routeId: routeID,
                 directionId: selectedDirectionID,
+                mode: selectedMode,
                 routeName: routeName,
                 directionName: directionName,
                 stopName: stop.name
             )
+            
+            var usingSchedule = false
+            if predictions.isEmpty && selectedMode == .commuterRail {
+                predictions = (try? await MBTAService.shared.fetchSchedules(
+                    stopId: stopID,
+                    routeId: routeID,
+                    directionId: selectedDirectionID,
+                    routeName: routeName,
+                    directionName: directionName,
+                    stopName: stop.name
+                )) ?? []
+                usingSchedule = true
+            }
+            
+            let limited = selectedMode == .commuterRail ? predictions : Array(predictions.prefix(3))
 
-            var newArrivals = Array(predictions.prefix(3)).map { arrival in
+            var newArrivals = limited.map { arrival in
                 BusArrival(
                     id: arrival.id,
                     routeId: arrival.routeId,
@@ -859,31 +908,34 @@ final class ArrivalsViewModel: ObservableObject {
                     minutesAway: arrival.minutesAway,
                     stopsAway: arrival.stopsAway,
                     directionId: arrival.directionId,
-                    status: arrival.status
+                    status: arrival.status,
+                    isScheduled: usingSchedule
                 )
             }
 
             // If new data has fewer results, keep old predictions that haven't expired
             // This prevents the third tile from flashing "--" between refreshes
-            let now = Date()
-            if newArrivals.count < arrivals.count {
-                let newIDs = Set(newArrivals.map(\.id))
-                for i in newArrivals.count..<arrivals.count {
-                    let old = arrivals[i]
-                    let arrivalTime = old.arrivalTime ?? old.departureTime
-                    if let arrivalTime, arrivalTime > now, !newIDs.contains(old.id) {
-                        newArrivals.append(old)
+            if selectedMode != .commuterRail {
+                let now = Date()
+                if newArrivals.count < arrivals.count {
+                    let newIDs = Set(newArrivals.map(\.id))
+                    for i in newArrivals.count..<arrivals.count {
+                        let old = arrivals[i]
+                        let arrivalTime = old.arrivalTime ?? old.departureTime
+                        if let arrivalTime, arrivalTime > now, !newIDs.contains(old.id) {
+                            newArrivals.append(old)
+                        }
+                    }
+                    newArrivals.sort { a, b in
+                        let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
+                        let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
+                        return aTime < bTime
                     }
                 }
-                // Re-sort merged results by arrival time
-                newArrivals.sort { a, b in
-                    let aTime = a.arrivalTime ?? a.departureTime ?? .distantFuture
-                    let bTime = b.arrivalTime ?? b.departureTime ?? .distantFuture
-                    return aTime < bTime
-                }
+                newArrivals = Array(newArrivals.prefix(3))
             }
 
-            arrivals = Array(newArrivals.prefix(3))
+            arrivals = newArrivals
         } catch {
             // Silent fail - don't update error message during background refresh
         }
@@ -996,6 +1048,7 @@ final class ArrivalsViewModel: ObservableObject {
         }
     }
     
+    // ⛔️ DO NOT MODIFY any Live Activity code from here through the end of the class — sealed and working. Any changes risk breaking Live Activity / Dynamic Island.
     func startLiveActivity(arrivalIndex: Int? = nil) {
         #if canImport(ActivityKit)
         guard #available(iOS 16.2, *) else { return }

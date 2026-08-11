@@ -633,76 +633,22 @@ struct ContentView: View {
                 .allowsHitTesting(!isPickingPrediction)
 
                 // Arrival cards
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(Array(displayedArrivals.enumerated()), id: \.element.id) { index, arrival in
-                        Button {
-                            guard isPickingPrediction else { return }
-                            guard arrival.minutesAway != nil, index < viewModel.arrivals.count else {
-                                haptic()
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    isPickingPrediction = false
-                                }
-                                return
+                if viewModel.selectedMode == .commuterRail {
+                    // Scrollable horizontal list for commuter rail
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 10) {
+                            ForEach(Array(viewModel.arrivals.enumerated()), id: \.element.id) { index, arrival in
+                                arrivalCard(arrival: arrival, index: index)
+                                    .frame(width: 100)
                             }
-                            haptic()
-                            let trackedTime = arrival.arrivalTime ?? arrival.departureTime
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                selectedPredictionArrivalTime = trackedTime
-                                isPickingPrediction = false
-                            }
-                            viewModel.startLiveActivity(arrivalIndex: index)
-
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showIslandHint = true
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    showIslandHint = false
-                                }
-                            }
-                        } label: {
-                            VStack(spacing: 6) {
-                                HStack(spacing: 4) {
-                                    Text(arrival.minutesAway.map { "\($0)" } ?? "--")
-                                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                                        .foregroundColor(arrival.minutesAway != nil ? .white : .white.opacity(0.3))
-
-                                    Text("min")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.5))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(white: 0.12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .stroke(
-                                                    isSelectedArrival(arrival) ? routeAccentColor : Color(white: 0.20),
-                                                    lineWidth: isSelectedArrival(arrival) ? 2 : 1
-                                                )
-                                        )
-                                )
-                                .scaleEffect(isPickingPrediction && arrival.minutesAway != nil ? 1.05 : 1.0)
-
-                                // Arrival time
-                                Text(arrivalTimeText(for: arrival))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .lineLimit(1)
-
-                                // Stops away (bus only)
-                                if let stopsText = stopsAwayText(for: arrival.stopsAway) {
-                                    Text(stopsText)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.35))
-                                        .lineLimit(1)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 1)
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(Array(displayedArrivals.enumerated()), id: \.element.id) { index, arrival in
+                            arrivalCard(arrival: arrival, index: index)
+                        }
                     }
                 }
 
@@ -833,6 +779,7 @@ struct ContentView: View {
 
     private var redesignedActionCards: some View {
         VStack(spacing: 10) {
+            // ⛔️ DO NOT MODIFY the Live Activity / Dynamic Island button below — sealed and working. Any changes risk breaking it.
             // Show on Dynamic Island — original pill-preview button
             if !viewModel.arrivals.isEmpty {
                 Button {
@@ -1054,7 +1001,7 @@ struct ContentView: View {
         case .subway:
             return "Upcoming Trains"
         case .commuterRail:
-            return "Upcoming Trains"
+            return "Departures"
         }
     }
 
@@ -1870,6 +1817,86 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func arrivalCard(arrival: BusArrival, index: Int) -> some View {
+        Button {
+            guard isPickingPrediction else { return }
+            guard arrival.minutesAway != nil, index < viewModel.arrivals.count else {
+                haptic()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isPickingPrediction = false
+                }
+                return
+            }
+            haptic()
+            let trackedTime = arrival.arrivalTime ?? arrival.departureTime
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                selectedPredictionArrivalTime = trackedTime
+                isPickingPrediction = false
+            }
+            viewModel.startLiveActivity(arrivalIndex: index)
+
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showIslandHint = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showIslandHint = false
+                }
+            }
+        } label: {
+            VStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(arrival.minutesAway.map { "\($0)" } ?? "--")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundColor(arrival.minutesAway != nil ? .white : .white.opacity(0.3))
+
+                    Text("min")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(white: 0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(
+                                    isSelectedArrival(arrival) ? routeAccentColor : Color(white: 0.20),
+                                    lineWidth: isSelectedArrival(arrival) ? 2 : 1
+                                )
+                        )
+                )
+                .scaleEffect(isPickingPrediction && arrival.minutesAway != nil ? 1.05 : 1.0)
+
+                // Time label
+                Text(arrivalTimeText(for: arrival))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+                    .lineLimit(1)
+                
+                // Scheduled/Live indicator for commuter rail
+                if viewModel.selectedMode == .commuterRail {
+                    Text(arrival.isScheduled ? "Scheduled" : "Live")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(arrival.isScheduled ? .orange.opacity(0.7) : .green.opacity(0.7))
+                        .lineLimit(1)
+                }
+
+                // Stops away (bus only)
+                if let stopsText = stopsAwayText(for: arrival.stopsAway) {
+                    Text(stopsText)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.35))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func stopsAwayText(for stopsAway: Int?) -> String? {
         guard viewModel.selectedMode.showsStopsAway else {
             return nil
@@ -1887,11 +1914,18 @@ struct ContentView: View {
     }
 
     private func arrivalTimeText(for arrival: BusArrival) -> String {
-        guard let date = arrival.arrivalTime ?? arrival.departureTime else {
-            return "Arrives --"
+        let isCommuterRail = viewModel.selectedMode == .commuterRail
+        // Commuter rail: show departure time; bus/subway: show arrival time
+        let date = isCommuterRail
+            ? (arrival.departureTime ?? arrival.arrivalTime)
+            : (arrival.arrivalTime ?? arrival.departureTime)
+        let verb = isCommuterRail ? "Departs" : "Arrives"
+        
+        guard let date else {
+            return "\(verb) --"
         }
 
-        return "Arrives \(formattedTime(date))"
+        return "\(verb) \(formattedTime(date))"
     }
 
     private func lineColor(for colorName: String) -> Color {

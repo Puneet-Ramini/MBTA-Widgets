@@ -78,16 +78,18 @@ struct CheckArrivalIntent: AppIntent {
 
         let modeNoun = SiriHelpers.modeSpecificNoun(for: favorite.mode)
         let routeLabel = SiriHelpers.routeDisplayLabel(for: favorite)
+        let verb = favorite.mode == .commuterRail ? "departs from" : "arrives at"
+        let verbPresent = favorite.mode == .commuterRail ? "departing from" : "arriving at"
 
         if first.minutes == 0 {
-            var response = "The \(routeLabel) \(modeNoun) is arriving at \(favorite.stopName) now!"
+            var response = "The \(routeLabel) \(modeNoun) is \(verbPresent) \(favorite.stopName) now!"
             if top.count > 1 {
                 response += " The next one is in \(top[1].minutes) minute\(top[1].minutes == 1 ? "" : "s")."
             }
             return response
         }
 
-        var response = "The next \(routeLabel) \(modeNoun) arrives at \(favorite.stopName) in \(first.minutes) minute\(first.minutes == 1 ? "" : "s")."
+        var response = "The next \(routeLabel) \(modeNoun) \(verb) \(favorite.stopName) in \(first.minutes) minute\(first.minutes == 1 ? "" : "s")."
 
         if top.count > 1 {
             response += " The one after that is in \(top[1].minutes) minute\(top[1].minutes == 1 ? "" : "s")."
@@ -131,13 +133,15 @@ enum SiriHelpers {
     }
 
     static func fetchArrivals(for favorite: SavedFavorite) async -> [(minutes: Int, time: Date)] {
+        let isCommuterRail = favorite.mode == .commuterRail
+        
         do {
             var components = URLComponents(string: "https://api-v3.mbta.com/predictions")!
             components.queryItems = [
                 URLQueryItem(name: "filter[stop]", value: favorite.stopID),
                 URLQueryItem(name: "filter[route]", value: favorite.routeID),
                 URLQueryItem(name: "filter[direction_id]", value: String(favorite.directionID)),
-                URLQueryItem(name: "sort", value: "arrival_time"),
+                URLQueryItem(name: "sort", value: isCommuterRail ? "departure_time" : "arrival_time"),
                 URLQueryItem(name: "api_key", value: apiKey)
             ]
 
@@ -153,12 +157,61 @@ enum SiriHelpers {
             let predictionsResponse = try decoder.decode(SiriPredictionsResponse.self, from: data)
 
             let now = Date()
-            return predictionsResponse.data.compactMap { prediction in
+            let results: [(minutes: Int, time: Date)] = predictionsResponse.data.compactMap { prediction in
                 let attrs = prediction.attributes
-                guard let time = attrs.arrivalTime ?? attrs.departureTime,
-                      time >= now else {
+                // Commuter rail: prefer departure time
+                let time = isCommuterRail
+                    ? (attrs.departureTime ?? attrs.arrivalTime)
+                    : (attrs.arrivalTime ?? attrs.departureTime)
+                guard let time, time >= now else {
                     return nil
                 }
+                let minutes = max(Int(time.timeIntervalSince(now) / 60), 0)
+                return (minutes: minutes, time: time)
+            }
+            
+            // Fall back to schedules for commuter rail when no predictions
+            if results.isEmpty && isCommuterRail {
+                return await fetchSchedules(for: favorite)
+            }
+            
+            return results
+        } catch {
+            return []
+        }
+    }
+    
+    /// Fetch scheduled departures as fallback when predictions are empty.
+    static func fetchSchedules(for favorite: SavedFavorite) async -> [(minutes: Int, time: Date)] {
+        do {
+            let now = Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            
+            var components = URLComponents(string: "https://api-v3.mbta.com/schedules")!
+            components.queryItems = [
+                URLQueryItem(name: "filter[stop]", value: favorite.stopID),
+                URLQueryItem(name: "filter[route]", value: favorite.routeID),
+                URLQueryItem(name: "filter[direction_id]", value: String(favorite.directionID)),
+                URLQueryItem(name: "filter[min_time]", value: formatter.string(from: now)),
+                URLQueryItem(name: "sort", value: "departure_time"),
+                URLQueryItem(name: "api_key", value: apiKey)
+            ]
+            
+            let (data, response) = try await URLSession.shared.data(from: components.url!)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return []
+            }
+            
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let schedulesResponse = try decoder.decode(SiriSchedulesResponse.self, from: data)
+            
+            return schedulesResponse.data.compactMap { schedule in
+                let time = schedule.attributes.departureTime ?? schedule.attributes.arrivalTime
+                guard let time, time >= now else { return nil }
                 let minutes = max(Int(time.timeIntervalSince(now) / 60), 0)
                 return (minutes: minutes, time: time)
             }
@@ -201,6 +254,26 @@ private struct SiriPredictionAttributes: Decodable, Sendable {
         case arrivalTime = "arrival_time"
         case departureTime = "departure_time"
         case directionId = "direction_id"
+    }
+}
+
+// MARK: - Siri Schedule Response Models
+
+private struct SiriSchedulesResponse: Decodable, Sendable {
+    let data: [SiriSchedule]
+}
+
+private struct SiriSchedule: Decodable, Sendable {
+    let attributes: SiriScheduleAttributes
+}
+
+private struct SiriScheduleAttributes: Decodable, Sendable {
+    let arrivalTime: Date?
+    let departureTime: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case arrivalTime = "arrival_time"
+        case departureTime = "departure_time"
     }
 }
 
